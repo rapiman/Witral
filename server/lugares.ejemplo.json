@@ -1,23 +1,37 @@
 {
+  "identidades": {
+    "personal": {
+      "nombre": "Tu Nombre",
+      "email": "tucorreo@gmail.com",
+      "usuario_git": "tu-usuario-github"
+    },
+    "pega": {
+      "nombre": "Tu Nombre (trabajo)",
+      "email": "tucorreo@empresa.cl",
+      "usuario_git": "tu-usuario-trabajo"
+    }
+  },
   "lugares": {
     "local": {
       "local": true,
-      "raiz": "C:\\Users\\jprapiman_transforma\\Documents\\Proyectos"
+      "raiz": "C:\\Users\\tu_usuario\\Documents\\Proyectos",
+      "identidad": "personal"
     },
     "dev": {
       "ssh": {
         "host": "dev.ejemplo.cl",
         "usuario": "jp",
         "puerto": 22,
-        "clave": "C:\\Users\\jprapiman_transforma\\.ssh\\id_rsa"
+        "clave": "C:\\Users\\tu_usuario\\.ssh\\id_rsa"
       },
       "db": {
         "motor": "postgres",
         "host": "127.0.0.1",
         "puerto": 5432,
-        "base": "fapp-database",
+        "base": "mi-base",
         "usuario": "postgres"
       },
+      "identidad": "pega",
       "rutas": {
         "repo": "/home/jp/proyecto",
         "web": "/var/www/html"
@@ -26,16 +40,16 @@
     "prod": {
       "sensible": true,
       "ssh": {
-        "host": "wedwed.ddns.net",
+        "host": "prod.ejemplo.cl",
         "usuario": "jp",
         "puerto": 22,
-        "clave": "C:\\Users\\jprapiman_transforma\\.ssh\\id_rsa"
+        "clave": "C:\\Users\\tu_usuario\\.ssh\\id_rsa"
       },
       "db": {
         "motor": "postgres",
         "host": "127.0.0.1",
         "puerto": 5432,
-        "base": "fapp-database",
+        "base": "mi-base",
         "usuario": "postgres"
       },
       "rutas": {

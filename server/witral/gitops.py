@@ -55,8 +55,16 @@ def commit(lugar: Lugar, repo: str, mensaje: str, todos: bool = False) -> T.Resu
     return _git(lugar, repo, args)
 
 
-def push(lugar: Lugar, repo: str) -> T.Resultado:
-    return _git(lugar, repo, ["push"])
+def push(lugar: Lugar, repo: str, forzar: bool = False) -> T.Resultado:
+    base = ["push", "--force-with-lease"] if forzar else ["push"]
+    r = _git(lugar, repo, base)
+    # Primer push de una rama sin upstream: configurarlo y reintentar.
+    if not r.ok and "no upstream branch" in (r.error + r.salida):
+        rama = _git(lugar, repo, ["rev-parse", "--abbrev-ref", "HEAD"])
+        nombre_rama = rama.salida.strip() or "main"
+        extra = ["--force-with-lease"] if forzar else []
+        return _git(lugar, repo, ["push", *extra, "--set-upstream", "origin", nombre_rama])
+    return r
 
 
 def add(lugar: Lugar, repo: str, rutas: list[str]) -> T.Resultado:
@@ -70,7 +78,6 @@ def reset_hard(lugar: Lugar, repo: str, ref: str = "HEAD") -> T.Resultado:
 
 
 # --- Inicialización / remotos -----------------------------------------------
-
 def init(lugar: Lugar, repo: str, rama: str = "main") -> T.Resultado:
     """git init + rama inicial. El directorio 'repo' debe existir."""
     r = _git(lugar, repo, ["init"])
@@ -91,3 +98,25 @@ def remote_add(lugar: Lugar, repo: str, nombre: str, url: str) -> T.Resultado:
 def remote_list(lugar: Lugar, repo: str) -> T.Resultado:
     """Lista remotos con sus URLs (git remote -v)."""
     return _git(lugar, repo, ["remote", "-v"])
+
+
+# --- Identidad (autor de commits) -------------------------------------------
+
+def set_identidad(lugar: Lugar, repo: str, nombre: str, email: str) -> T.Resultado:
+    """Fija el autor (user.name/user.email) local a este repo."""
+    rn = _git(lugar, repo, ["config", "user.name", nombre])
+    if not rn.ok:
+        return rn
+    re = _git(lugar, repo, ["config", "user.email", email])
+    if not re.ok:
+        return re
+    return T.Resultado(0, f"Identidad fijada: {nombre} <{email}>", "")
+
+
+def get_identidad(lugar: Lugar, repo: str) -> T.Resultado:
+    """Lee el autor actual (user.name/user.email) del repo."""
+    n = _git(lugar, repo, ["config", "user.name"])
+    e = _git(lugar, repo, ["config", "user.email"])
+    nombre = n.salida.strip() or "(sin definir)"
+    email = e.salida.strip() or "(sin definir)"
+    return T.Resultado(0, f"{nombre} <{email}>", "")

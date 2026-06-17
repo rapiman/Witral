@@ -35,11 +35,29 @@ mcp = FastMCP("witral")
 _cfg = C.cargar()
 
 
+def _aviso_config() -> str:
+    """Banner de config rota, o cadena vacía si todo bien."""
+    if _cfg.error_config:
+        return (
+            "⚠️  CONFIG CON ERRORES — Witral arrancó solo con el lugar 'local'.\n"
+            f"{_cfg.error_config}\n"
+            "Corregí el archivo y reiniciá para recuperar los demás lugares "
+            "e identidades.\n\n"
+        )
+    return ""
+
+
 def _resolver(donde: str | None):
     """Resuelve un lugar o devuelve (None, aviso) si es destino desconocido."""
     try:
         return _cfg.resolver(donde), None
     except DestinoDesconocido as e:
+        # Si la config está rota, ese es el motivo real de que falte el lugar.
+        if _cfg.error_config and donde not in (None, C.LOCAL):
+            return None, (
+                _aviso_config() +
+                f"Por eso el lugar '{donde}' no está disponible."
+            )
         return None, (
             f"DESTINO DESCONOCIDO: '{donde}'. {e}\n"
             f"No se conectó. Confirmá con el usuario y agregá el lugar a la "
@@ -66,7 +84,7 @@ def lugares() -> str:
         tipo = "local" if lg.es_local else "remoto"
         sens = " [sensible]" if lg.sensible else ""
         out.append(f"- {nombre} ({tipo}){sens}")
-    return "\n".join(out)
+    return _aviso_config() + "\n".join(out)
 
 
 # --- Archivos ---------------------------------------------------------------
@@ -420,17 +438,22 @@ def git_commit(repo: str, mensaje: str, todos: bool = False, donde: str = "local
 
 
 @mcp.tool()
-def git_push(repo: str, donde: str = "local", confirmado: bool = False) -> str:
-    """git push. Publica => requiere confirmado=True."""
+def git_push(repo: str, donde: str = "local", forzar: bool = False,
+             confirmado: bool = False) -> str:
+    """
+    git push. Publica => requiere confirmado=True. Con forzar=True usa
+    --force-with-lease (reescribe la rama remota; úsese con cuidado).
+    """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     if not confirmado:
+        modo = " (FORZADO: reescribe la rama remota)" if forzar else ""
         return (
-            f"CONFIRMACIÓN REQUERIDA: git push publica cambios desde '{donde}'.\n"
+            f"CONFIRMACIÓN REQUERIDA: git push publica cambios desde '{donde}'{modo}.\n"
             f"Confirmá con el usuario y reintentá con confirmado=True."
         )
-    return _fmt(G.push(lg, repo))
+    return _fmt(G.push(lg, repo, forzar))
 
 
 @mcp.tool()
@@ -473,6 +496,32 @@ def git_remote(repo: str, donde: str = "local") -> str:
     if aviso:
         return aviso
     return _fmt(G.remote_list(lg, repo))
+
+
+@mcp.tool()
+def git_identidad(repo: str, identidad: str = "", donde: str = "local") -> str:
+    """
+    Fija el autor (user.name/email) de un repo según una identidad definida en
+    la config. Sin 'identidad', usa la identidad por defecto del lugar; si el
+    lugar no define ninguna, muestra la identidad actual del repo.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    nombre_id = identidad or lg.identidad
+    if not nombre_id:
+        actual = _fmt(G.get_identidad(lg, repo))
+        disp = ", ".join(_cfg.identidades) or "(ninguna definida)"
+        return (
+            f"Identidad actual del repo:\n{actual}\n"
+            f"No se indicó identidad ni el lugar '{donde}' define una por "
+            f"defecto. Identidades disponibles: {disp}."
+        )
+    try:
+        ident = _cfg.identidad(nombre_id)
+    except C.ConfigError as e:
+        return f"error: {e}"
+    return _fmt(G.set_identidad(lg, repo, ident.nombre, ident.email))
 
 
 # --- Red --------------------------------------------------------------------

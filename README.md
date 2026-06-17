@@ -79,7 +79,7 @@ En local, los comandos corren por `subprocess`; en remoto, viajan por SSH (`para
 `psql` — consulta/sentencia sobre la base local de un lugar · `psql_aplicar` — aplica un `.sql` (migraciones).
 
 **Git**
-`git_status` · `git_log` · `git_diff` · `git_branch` · `git_show` · `git_pull` · `git_add` · `git_commit` · `git_push` · `git_reset_hard`
+`git_init` · `git_status` · `git_log` · `git_diff` · `git_branch` · `git_show` · `git_pull` · `git_add` · `git_commit` · `git_push` · `git_reset_hard` · `git_remote` · `git_remote_add` · `git_identidad`
 
 **Red**
 `ping` · `http_request` · `tcp_socket`
@@ -143,8 +143,35 @@ Campos por lugar:
 - `ssh` — `host`, `usuario`, `puerto`, y autenticación por `clave` (ruta a la clave privada) o `password`.
 - `db` — config para `psql` en ese lugar.
 - `rutas` — rutas con nombre dentro del lugar (repo, web, etc.).
+- `identidad` — nombre de la identidad git por defecto para los repos de este lugar (ver abajo).
 
 **Autenticación recomendada: por clave SSH, no por contraseña.** Si usas `password`, es responsabilidad del archivo local mantenerlo protegido.
+
+### Identidades git
+
+Si trabajas con varias cuentas (personal y de trabajo, por ejemplo), puedes declarar **identidades** y asignarlas a tus repos sin recordar correos a mano. Se definen en una sección hermana de `lugares`:
+
+```json
+{
+  "identidades": {
+    "personal": { "nombre": "Tu Nombre", "email": "tu@gmail.com", "usuario_git": "tu-usuario" },
+    "pega":     { "nombre": "Tu Nombre", "email": "tu@empresa.cl", "usuario_git": "tu-usuario-pega" }
+  },
+  "lugares": { "...": "..." }
+}
+```
+
+Cada identidad tiene `nombre` y `email` (el autor de los commits) y, opcionalmente, `usuario_git` (reservado para uso futuro: enrutar el remoto a una cuenta). Un lugar puede declarar su identidad por defecto con el campo `identidad`.
+
+La tool `git_identidad` la aplica a un repo:
+
+```
+git_identidad(repo="mi-repo")                      # usa la identidad por defecto del lugar
+git_identidad(repo="mi-repo", identidad="pega")    # fuerza una identidad específica
+git_identidad(repo="mi-repo")                       # sin identidad ni default: muestra la actual
+```
+
+Por ahora `git_identidad` fija únicamente el **autor del commit** (`user.name` / `user.email`), local a ese repo. No toca el remoto ni las credenciales de push: esas las gestiona el credential manager del sistema.
 
 ---
 

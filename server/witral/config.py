@@ -56,6 +56,15 @@ class DBConfig:
 
 
 @dataclass
+class Identidad:
+    """Identidad git: autor de los commits. 'usuario_git' se reserva para
+    uso futuro (enrutar el remoto a una cuenta); hoy solo se usa autor."""
+    nombre: str
+    email: str
+    usuario_git: str | None = None
+
+
+@dataclass
 class Lugar:
     nombre: str
     es_local: bool = False
@@ -65,6 +74,8 @@ class Lugar:
     sensible: bool = False
     ssh: SSHConfig | None = None
     db: DBConfig | None = None
+    # Nombre de la identidad git por defecto para repos en este lugar.
+    identidad: str | None = None
     # Rutas con nombre dentro del lugar (repo, web, etc.), libres.
     rutas: dict[str, str] = field(default_factory=dict)
 
@@ -118,6 +129,14 @@ def _parse_db(d: dict) -> DBConfig:
     )
 
 
+def _parse_identidad(d: dict) -> Identidad:
+    return Identidad(
+        nombre=d["nombre"],
+        email=d["email"],
+        usuario_git=d.get("usuario_git"),
+    )
+
+
 def _parse_lugar(nombre: str, d: dict) -> Lugar:
     es_local = bool(d.get("local", nombre == LOCAL))
     return Lugar(
@@ -127,6 +146,7 @@ def _parse_lugar(nombre: str, d: dict) -> Lugar:
         sensible=bool(d.get("sensible", False)),
         ssh=_parse_ssh(d["ssh"]) if "ssh" in d else None,
         db=_parse_db(d["db"]) if "db" in d else None,
+        identidad=d.get("identidad"),
         rutas=dict(d.get("rutas", {})),
     )
 
@@ -134,15 +154,35 @@ def _parse_lugar(nombre: str, d: dict) -> Lugar:
 class Config:
     """Conjunto de lugares cargados, con resolución por nombre."""
 
-    def __init__(self, lugares: dict[str, Lugar]):
+    def __init__(self, lugares: dict[str, Lugar],
+                 identidades: dict[str, Identidad] | None = None,
+                 error_config: str | None = None):
         self._lugares = lugares
+        self._identidades = identidades or {}
+        # Si la config no pudo cargarse (JSON roto, etc.), aquí queda el
+        # detalle. El servidor arranca igual, pero las tools lo reportan.
+        self.error_config = error_config
 
     @property
     def nombres(self) -> list[str]:
         return list(self._lugares.keys())
 
+    @property
+    def identidades(self) -> list[str]:
+        return list(self._identidades.keys())
+
     def existe(self, nombre: str) -> bool:
         return nombre in self._lugares
+
+    def identidad(self, nombre: str) -> Identidad:
+        """Resuelve una identidad por nombre. Error si no existe."""
+        if nombre not in self._identidades:
+            disponibles = ", ".join(self._identidades.keys()) or "(ninguna)"
+            raise ConfigError(
+                f"Identidad desconocida: '{nombre}'. "
+                f"Identidades definidas: {disponibles}."
+            )
+        return self._identidades[nombre]
 
     def resolver(self, nombre: str | None) -> Lugar:
         """
@@ -174,23 +214,63 @@ class DestinoDesconocido(ConfigError):
         )
 
 
+def _formatear_error_json(ruta, texto: str, e: "json.JSONDecodeError") -> str:
+    """Arma un mensaje claro de error JSON con la línea señalada y un puntero."""
+    lineas = texto.splitlines()
+    n = e.lineno
+    bloque = []
+    # Mostrar la línea problemática y una de contexto antes/después.
+    for i in range(max(1, n - 1), min(len(lineas), n + 1) + 1):
+        marca = ">>" if i == n else "  "
+        bloque.append(f"  {marca} {i:>3} | {lineas[i - 1]}")
+        if i == n:
+            bloque.append("        " + " " * (e.colno + 2) + "^")
+    contexto = "\n".join(bloque)
+    return (
+        f"Config inválida en {ruta}\n"
+        f"  {e.msg} (línea {e.lineno}, columna {e.colno})\n\n"
+        f"{contexto}\n\n"
+        f"  Pistas frecuentes: coma de más antes de }} o ], falta una coma "
+        f"entre bloques, comillas simples en vez de dobles, o una llave suelta."
+    )
+
+
 def cargar() -> Config:
-    """Carga la config desde disco. Siempre garantiza un lugar 'local'."""
+    """Carga la config desde disco. Siempre garantiza un lugar 'local'.
+
+    NUNCA lanza por config inválida: si el JSON está roto o un lugar mal
+    formado, el servidor arranca igual con solo 'local' y el detalle del
+    error queda en Config.error_config para que las tools lo reporten.
+    """
     ruta = _ruta_config()
     lugares: dict[str, Lugar] = {}
+    identidades: dict[str, Identidad] = {}
+    error_config: str | None = None
 
     if ruta.exists():
+        texto = ruta.read_text(encoding="utf-8-sig")
         try:
-            data = json.loads(ruta.read_text(encoding="utf-8-sig"))
+            data = json.loads(texto)
+            for nombre, d in data.get("lugares", {}).items():
+                lugares[nombre] = _parse_lugar(nombre, d)
+            for nombre, d in data.get("identidades", {}).items():
+                identidades[nombre] = _parse_identidad(d)
         except json.JSONDecodeError as e:
-            raise ConfigError(f"Config inválida en {ruta}: {e}") from e
-        for nombre, d in data.get("lugares", {}).items():
-            lugares[nombre] = _parse_lugar(nombre, d)
+            error_config = _formatear_error_json(ruta, texto, e)
+            lugares.clear()
+            identidades.clear()
+        except (KeyError, TypeError, ValueError) as e:
+            error_config = (
+                f"Config con estructura inválida en {ruta}: {e}\n"
+                f"Revisá que cada lugar/identidad tenga los campos correctos."
+            )
+            lugares.clear()
+            identidades.clear()
 
-    # Garantizar 'local'.
+    # Garantizar 'local' (siempre, incluso si la config falló).
     if LOCAL not in lugares:
         lugares[LOCAL] = Lugar(nombre=LOCAL, es_local=True)
     if lugares[LOCAL].raiz is None:
         lugares[LOCAL].raiz = _raiz_local_por_defecto()
 
-    return Config(lugares)
+    return Config(lugares, identidades, error_config)

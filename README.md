@@ -228,6 +228,12 @@ En `claude_desktop_config.json`:
 
 ---
 
+## Control de cambios
+
+El registro de cambios se mantiene en [CHANGELOG.md](CHANGELOG.md), siguiendo el estándar [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) (v1.1.0, español).
+
+---
+
 ```
 Tejido en Chile. © 2026
 ```

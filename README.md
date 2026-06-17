@@ -182,6 +182,9 @@ Por ahora `git_identidad` fija únicamente el **autor del commit** (`user.name` 
 
 ## Instalación
 
+> Para los pasos completos desde cero (config, conexión a Claude Desktop,
+> problemas frecuentes), ver **[INSTALL.md](INSTALL.md)**. Resumen rápido:
+
 Requiere **Python ≥ 3.10**.
 
 ```bash

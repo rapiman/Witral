@@ -7,6 +7,11 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Añadido
+
+- `INSTALL.md`: guía de instalación paso a paso (requisitos, config, conexión a
+  Claude Desktop, problemas frecuentes), enlazada desde el README.
+
 ## [0.2.0] - 2026-06-17
 
 ### Añadido

@@ -420,6 +420,15 @@ def git_pull(repo: str, donde: str = "local") -> str:
 
 
 @mcp.tool()
+def git_fetch(repo: str, donde: str = "local") -> str:
+    """git fetch --all. Actualiza refs remotas sin tocar el working tree."""
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return _fmt(G.fetch(lg, repo))
+
+
+@mcp.tool()
 def git_add(repo: str, rutas: str, donde: str = "local") -> str:
     """git add (rutas separadas por espacio)."""
     lg, aviso = _resolver(donde)

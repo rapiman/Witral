@@ -48,6 +48,11 @@ def pull(lugar: Lugar, repo: str) -> T.Resultado:
     return _git(lugar, repo, ["pull", "--ff-only"])
 
 
+def fetch(lugar: Lugar, repo: str) -> T.Resultado:
+    """git fetch de todos los remotos. No modifica el working tree."""
+    return _git(lugar, repo, ["fetch", "--all"])
+
+
 def commit(lugar: Lugar, repo: str, mensaje: str, todos: bool = False) -> T.Resultado:
     args = ["commit", "-m", mensaje]
     if todos:

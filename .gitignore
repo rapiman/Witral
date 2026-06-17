@@ -1,0 +1,22 @@
+# Credenciales y config local — NUNCA versionar
+lugares.json
+server/lugares.json
+server/witral/lugares.json
+
+# Witral runtime
+.witral/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Entornos / editores
+.idea/
+.vscode/
+*.swp
+.DS_Store

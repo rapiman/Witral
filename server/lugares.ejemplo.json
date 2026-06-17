@@ -1,0 +1,47 @@
+{
+  "lugares": {
+    "local": {
+      "local": true,
+      "raiz": "C:\\Users\\jprapiman_transforma\\Documents\\Proyectos"
+    },
+    "dev": {
+      "ssh": {
+        "host": "dev.ejemplo.cl",
+        "usuario": "jp",
+        "puerto": 22,
+        "clave": "C:\\Users\\jprapiman_transforma\\.ssh\\id_rsa"
+      },
+      "db": {
+        "motor": "postgres",
+        "host": "127.0.0.1",
+        "puerto": 5432,
+        "base": "fapp-database",
+        "usuario": "postgres"
+      },
+      "rutas": {
+        "repo": "/home/jp/proyecto",
+        "web": "/var/www/html"
+      }
+    },
+    "prod": {
+      "sensible": true,
+      "ssh": {
+        "host": "wedwed.ddns.net",
+        "usuario": "jp",
+        "puerto": 22,
+        "clave": "C:\\Users\\jprapiman_transforma\\.ssh\\id_rsa"
+      },
+      "db": {
+        "motor": "postgres",
+        "host": "127.0.0.1",
+        "puerto": 5432,
+        "base": "fapp-database",
+        "usuario": "postgres"
+      },
+      "rutas": {
+        "repo": "/home/jp/proyecto",
+        "web": "/var/www/html"
+      }
+    }
+  }
+}

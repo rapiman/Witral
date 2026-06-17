@@ -26,6 +26,7 @@ from . import transporte as T
 from . import gitops as G
 from . import red as R
 from . import movil as M
+from . import sistema as S
 from . import busqueda as B
 from .config import DestinoDesconocido
 from .seguridad import RutaFueraDeRaiz
@@ -286,28 +287,80 @@ def copiar(origen_ruta: str, destino_lugar: str, destino_ruta: str,
         return f"error: {e}"
 
 
-# --- SSH --------------------------------------------------------------------
+# --- Ejecución de comandos (run) --------------------------------------------
 
 @mcp.tool()
-def ssh_run(donde: str, comando: str, confirmado: bool = False) -> str:
+def run(comando: str, donde: str = "local", confirmado: bool = False) -> str:
     """
-    Ejecuta un comando puntual en un lugar remoto y devuelve la salida. En un
-    lugar sensible (prod) requiere confirmado=True. No es sesión interactiva.
+    Ejecuta un comando arbitrario en un lugar (local o remoto) y devuelve la
+    salida. SIEMPRE requiere confirmado=True: es una escotilla de propósito
+    general. Para operaciones comunes (archivos, git, procesos, servicios)
+    preferí las tools tipadas con eje 'donde', que son más seguras y claras.
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
-    if lg.es_local:
-        return "error: ssh_run es para lugares remotos; en local usá las acciones directas."
-    if lg.sensible and not confirmado:
+    if not confirmado:
+        extra = " (LUGAR SENSIBLE)" if lg.sensible else ""
         return (
-            f"CONFIRMACIÓN REQUERIDA: comando en '{donde}' (sensible): {comando}\n"
-            f"Confirmá con el usuario y reintentá con confirmado=True."
+            f"CONFIRMACIÓN REQUERIDA para ejecutar un comando en '{donde}'{extra}.\n"
+            f"Comando: {comando}\n"
+            f"Si existe una tool tipada para esto (borrar, editar, git_*, "
+            f"matar_proceso, servicio, etc.) usala mejor. "
+            f"Para continuar igual, reintentá con confirmado=True."
         )
     try:
         return _fmt(T.ejecutar(lg, comando))
     except T.TransporteError as e:
         return f"error: {e}"
+
+
+# --- Sistema (procesos y servicios, por SO del lugar) -----------------------
+
+@mcp.tool()
+def procesos(donde: str = "local", filtro: str = "") -> str:
+    """Lista procesos en un lugar. 'filtro' acota por nombre/patrón. Solo lectura."""
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return _fmt(S.procesos(lg, filtro))
+
+
+@mcp.tool()
+def matar_proceso(patron: str, donde: str = "local", confirmado: bool = False) -> str:
+    """
+    Mata procesos cuyo nombre/línea coincide con 'patron' (taskkill en Windows,
+    pkill en unix). DESTRUCTIVO => requiere confirmado=True.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    if not confirmado:
+        return (
+            f"CONFIRMACIÓN REQUERIDA: matar procesos que coincidan con "
+            f"'{patron}' en '{donde}'.\n"
+            f"Confirmá con el usuario y reintentá con confirmado=True."
+        )
+    return _fmt(S.matar_proceso(lg, patron))
+
+
+@mcp.tool()
+def servicio(accion: str, nombre: str, donde: str = "local",
+             confirmado: bool = False) -> str:
+    """
+    Controla un servicio: status | start | stop | restart (systemctl en unix,
+    sc en Windows). 'status' es lectura; start/stop/restart requieren confirmado=True.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    if accion.lower() != "status" and not confirmado:
+        return (
+            f"CONFIRMACIÓN REQUERIDA: '{accion}' sobre el servicio '{nombre}' "
+            f"en '{donde}'.\n"
+            f"Confirmá con el usuario y reintentá con confirmado=True."
+        )
+    return _fmt(S.servicio(lg, accion, nombre))
 
 
 # --- Base de datos (psql en un lugar) --------------------------------------

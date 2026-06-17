@@ -15,6 +15,7 @@
     "local": {
       "local": true,
       "raiz": "C:\\Users\\tu_usuario\\Documents\\Proyectos",
+      "so": "windows",
       "identidad": "personal"
     },
     "dev": {

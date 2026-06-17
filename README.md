@@ -48,6 +48,7 @@ Witral es un servidor [MCP](https://modelcontextprotocol.io) construido con **Fa
 | `copiar.py` | Copia de archivos entre lugares vía SFTP. |
 | `red.py` | `ping`, peticiones HTTP, sockets TCP. |
 | `movil.py` | ADB (dispositivos, shell, install, force-stop, relanzar) y tareas Gradle. |
+| `sistema.py` | Procesos y servicios, con sintaxis según el SO del lugar (windows/unix). |
 | `busqueda.py` | Búsqueda por nombre de archivo y por contenido (grep) en un proyecto. |
 
 ### El eje `donde`
@@ -72,8 +73,11 @@ En local, los comandos corren por `subprocess`; en remoto, viajan por SSH (`para
 **Entre lugares**
 `copiar` — copia un archivo de un lugar a otro por SFTP.
 
-**SSH**
-`ssh_run` — comando puntual en un lugar remoto.
+**Ejecución y sistema** (eje `donde`, según el SO del lugar)
+`run` — comando arbitrario en un lugar (local o remoto); escotilla de propósito general, siempre pide confirmación.
+`procesos` — lista procesos (`tasklist`/`ps` según SO).
+`matar_proceso` — mata por nombre/patrón (`taskkill`/`pkill`).
+`servicio` — status/start/stop/restart (`sc`/`systemctl`).
 
 **Base de datos**
 `psql` — consulta/sentencia sobre la base local de un lugar · `psql_aplicar` — aplica un `.sql` (migraciones).
@@ -144,6 +148,7 @@ Campos por lugar:
 - `db` — config para `psql` en ese lugar.
 - `rutas` — rutas con nombre dentro del lugar (repo, web, etc.).
 - `identidad` — nombre de la identidad git por defecto para los repos de este lugar (ver abajo).
+- `so` — sistema operativo del lugar: `windows` o `unix` (linux/mac). Decide la sintaxis de las tools de sistema (`procesos`, `servicio`, etc.). Se autodetecta para el lugar local; los remotos asumen `unix` salvo que se declare. Un Windows remoto accesible por SSH se declara con `"so": "windows"`.
 
 **Autenticación recomendada: por clave SSH, no por contraseña.** Si usas `password`, es responsabilidad del archivo local mantenerlo protegido.
 

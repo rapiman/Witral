@@ -7,6 +7,25 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+## [0.2.0] - 2026-06-17
+
+### Añadido
+
+- **`run`**: ejecuta un comando arbitrario en cualquier lugar (local o remoto)
+  con el eje `donde`. Siempre requiere `confirmado=True` y empuja hacia las tools
+  tipadas. Generaliza y reemplaza a `ssh_run`.
+- **Tools de sistema** que ramifican por el SO del lugar (Windows vs unix):
+  - `procesos` — lista procesos (`tasklist` / `ps aux`). Solo lectura.
+  - `matar_proceso` — mata por nombre/patrón (`taskkill` / `pkill`). Requiere confirmación.
+  - `servicio` — status/start/stop/restart (`sc` / `systemctl`). `status` es lectura.
+- **Campo `so` por lugar** (`windows` | `unix`) en la config: autodetectado para
+  el lugar local, `unix` por defecto en remotos, declarable. Permite, por ejemplo,
+  manejar un Windows remoto accesible por SSH con `"so": "windows"`.
+
+### Cambiado
+
+- `ssh_run` eliminado; su funcionalidad la cubre `run` (que además funciona en local).
+
 ## [0.1.0] - 2026-06-17
 
 Primera versión pública. Servidor MCP con el modelo **lugares × acciones**:
@@ -65,5 +84,6 @@ cada acción opera sobre un *lugar* (local o remoto) según el parámetro `donde
   Witral arranca con el lugar `local` y reporta el error (con línea y columna) en
   las herramientas que dependen de la config.
 
-[No publicado]: https://github.com/rapiman/Witral/compare/v0.1.0...HEAD
+[No publicado]: https://github.com/rapiman/Witral/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/rapiman/Witral/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rapiman/Witral/releases/tag/v0.1.0

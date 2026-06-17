@@ -74,10 +74,17 @@ class Lugar:
     sensible: bool = False
     ssh: SSHConfig | None = None
     db: DBConfig | None = None
+    # Sistema operativo del lugar: "windows" o "unix" (linux/mac).
+    # Decide la sintaxis de las tools de sistema (procesos, servicios, etc.).
+    so: str = "unix"
     # Nombre de la identidad git por defecto para repos en este lugar.
     identidad: str | None = None
     # Rutas con nombre dentro del lugar (repo, web, etc.), libres.
     rutas: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def es_windows(self) -> bool:
+        return self.so == "windows"
 
     def requiere_ssh(self) -> SSHConfig:
         if self.es_local:
@@ -137,8 +144,21 @@ def _parse_identidad(d: dict) -> Identidad:
     )
 
 
+def _so_por_defecto(es_local: bool) -> str:
+    """SO por defecto: autodetecta el local; remotos asumen unix."""
+    if es_local:
+        import platform
+        return "windows" if platform.system() == "Windows" else "unix"
+    return "unix"
+
+
 def _parse_lugar(nombre: str, d: dict) -> Lugar:
     es_local = bool(d.get("local", nombre == LOCAL))
+    so = d.get("so")
+    if so:
+        so = "windows" if so.lower().startswith("win") else "unix"
+    else:
+        so = _so_por_defecto(es_local)
     return Lugar(
         nombre=nombre,
         es_local=es_local,
@@ -146,6 +166,7 @@ def _parse_lugar(nombre: str, d: dict) -> Lugar:
         sensible=bool(d.get("sensible", False)),
         ssh=_parse_ssh(d["ssh"]) if "ssh" in d else None,
         db=_parse_db(d["db"]) if "db" in d else None,
+        so=so,
         identidad=d.get("identidad"),
         rutas=dict(d.get("rutas", {})),
     )
@@ -269,7 +290,8 @@ def cargar() -> Config:
 
     # Garantizar 'local' (siempre, incluso si la config falló).
     if LOCAL not in lugares:
-        lugares[LOCAL] = Lugar(nombre=LOCAL, es_local=True)
+        lugares[LOCAL] = Lugar(nombre=LOCAL, es_local=True,
+                               so=_so_por_defecto(True))
     if lugares[LOCAL].raiz is None:
         lugares[LOCAL].raiz = _raiz_local_por_defecto()
 

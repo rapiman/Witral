@@ -315,6 +315,74 @@ def run(comando: str, donde: str = "local", confirmado: bool = False) -> str:
         return f"error: {e}"
 
 
+@mcp.tool()
+def tarea_crear(comando: str, cwd: str = "", confirmado: bool = False) -> str:
+    """
+    Lanza un comando como tarea programada de Windows, FUERA del sandbox del
+    cliente MCP, y retorna de inmediato el nombre de la tarea (no espera). Para
+    comandos que necesitan sockets loopback (Java/servidores locales), bloqueados
+    dentro del aislamiento de Claude Desktop. Consultá el avance con tarea_estado,
+    detené con tarea_matar y limpiá con tarea_borrar. Solo local Windows; siempre
+    requiere confirmado=True. 'cwd' fija el directorio (relativo a la raíz o absoluto).
+    """
+    lg = _cfg.resolver("local")
+    if not lg.es_windows:
+        return "tarea_crear aplica solo en local Windows. En unix usá 'run'."
+    if not confirmado:
+        return (
+            f"CONFIRMACIÓN REQUERIDA: lanzar tarea fuera del sandbox.\n"
+            f"Comando: {comando}\nReintentá con confirmado=True."
+        )
+    cwd_abs = None
+    if cwd:
+        from .seguridad import normalizar
+        cwd_abs = str(normalizar(lg.raiz, cwd))
+    try:
+        nombre = T.tarea_lanzar(comando, cwd=cwd_abs)
+        return f"Tarea lanzada: {nombre}\nConsultá con tarea_estado('{nombre}')."
+    except Exception as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
+def tarea_estado(nombre: str) -> str:
+    """
+    Estado de una tarea lanzada con tarea_crear: si terminó, su código de salida
+    y la salida capturada hasta el momento (log parcial mientras corre).
+    """
+    try:
+        r = T.tarea_consultar(nombre)
+    except Exception as e:
+        return f"error: {e}"
+    if not r["existe"] and not r["terminada"]:
+        return f"La tarea '{nombre}' no existe (¿ya se borró?)."
+    if r["terminada"]:
+        cab = f"TERMINADA (código {r['codigo']})"
+    else:
+        cab = "EN EJECUCIÓN…"
+    salida = r["salida"] or "(sin salida aún)"
+    return f"{cab}\n--- salida ---\n{salida}"
+
+
+@mcp.tool()
+def tarea_matar(nombre: str, confirmado: bool = False) -> str:
+    """Detiene la ejecución en curso de una tarea (schtasks /end)."""
+    if not confirmado:
+        return (
+            f"CONFIRMACIÓN REQUERIDA: detener la tarea '{nombre}'.\n"
+            f"Reintentá con confirmado=True."
+        )
+    ok = T.tarea_detener(nombre)
+    return f"Tarea '{nombre}' detenida." if ok else f"No se pudo detener '{nombre}'."
+
+
+@mcp.tool()
+def tarea_borrar(nombre: str) -> str:
+    """Borra la tarea y limpia sus archivos temporales (.out/.bat/.done)."""
+    ok = T.tarea_eliminar(nombre)
+    return f"Tarea '{nombre}' borrada." if ok else f"No se pudo borrar '{nombre}'."
+
+
 # --- Sistema (procesos y servicios, por SO del lugar) -----------------------
 
 @mcp.tool()
@@ -665,13 +733,20 @@ def adb_relanzar(serial: str, paquete: str, donde: str = "local") -> str:
 # --- Gradle -----------------------------------------------------------------
 
 @mcp.tool()
-def gradle_task(proyecto: str, tarea: str, donde: str = "local") -> str:
-    """Corre una tarea de build con el gradlew del proyecto."""
+def gradle_build(proyecto: str, tarea: str = "assembleDebug",
+                 donde: str = "local") -> str:
+    """
+    Compila un proyecto con su gradlew. En local Windows el build NO puede correr
+    dentro del sandbox del cliente MCP (Gradle necesita sockets loopback), así que
+    se lanza como tarea programada y esta función RETORNA AL TOQUE con el nombre
+    de la tarea: seguí el avance con tarea_estado(nombre). En unix/remoto compila
+    de forma síncrona (ahí no hay sandbox) y devuelve la salida directamente.
+    """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
-        return _fmt(M.gradle_task(lg, proyecto, tarea))
+        return M.gradle_build(lg, proyecto, tarea)
     except RutaFueraDeRaiz as e:
         return f"error: {e}"
 

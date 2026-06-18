@@ -15,6 +15,10 @@ siguen funcionando y solo fallan las remotas, con un mensaje claro.
 from __future__ import annotations
 
 import subprocess
+import os as _os
+import time as _time
+import uuid as _uuid
+import tempfile as _tempfile
 from dataclasses import dataclass
 
 from .config import Lugar, SSHConfig
@@ -105,8 +109,20 @@ def ejecutar(lugar: Lugar, argv: list[str] | str, *, cwd: str | None = None,
 def _ejecutar_local(argv, *, cwd, entrada, timeout) -> Resultado:
     usar_shell = isinstance(argv, str)
     import os as _os
+    import tempfile as _tempfile
     env = _os.environ.copy()
     env.setdefault("GIT_TERMINAL_PROMPT", "0")
+    # Asegurar TMP/TEMP válidos: el entorno heredado del cliente MCP puede
+    # traerlos sin definir o con valores rotos (p. ej. "%TMP%" literal). La JVM
+    # los necesita para crear el socket de su selector NIO; sin esto, Gradle/
+    # Java fallan con "Unable to establish loopback connection".
+    tmp_ok = _tempfile.gettempdir()
+    for var in ("TMP", "TEMP"):
+        valor = env.get(var, "")
+        if (not valor) or ("%" in valor) or (not _os.path.isdir(valor.strip())):
+            env[var] = tmp_ok
+        else:
+            env[var] = valor.strip()
     kwargs = dict(
         shell=usar_shell,
         cwd=cwd,
@@ -118,12 +134,111 @@ def _ejecutar_local(argv, *, cwd, entrada, timeout) -> Resultado:
     if entrada is not None:
         kwargs["input"] = entrada
     else:
-        kwargs["stdin"] = subprocess.DEVNULL
+        # stdin como pipe vacío (EOF inmediato), NO DEVNULL: evita que git
+        # cuelgue esperando entrada, pero le da a la JVM/Gradle un handle de
+        # stdin válido para su selector NIO (DEVNULL rompe el loopback en Windows).
+        kwargs["input"] = ""
     try:
         proc = subprocess.run(argv, **kwargs)
     except subprocess.TimeoutExpired as e:
         return Resultado(124, e.stdout or "", f"timeout tras {timeout}s")
     return Resultado(proc.returncode, proc.stdout, proc.stderr)
+
+
+def _sch(args):
+    return subprocess.run(["schtasks", *args], capture_output=True,
+                          text=True, timeout=30)
+
+
+def _tarea_base(nombre: str) -> str:
+    return _os.path.join(_tempfile.gettempdir(), nombre)
+
+
+def tarea_lanzar(comando: str, *, cwd: str | None = None) -> str:
+    """
+    Lanza un comando como tarea programada de Windows (fuera del sandbox del
+    cliente MCP) y RETORNA DE INMEDIATO el nombre de la tarea. No espera a que
+    termine. Para procesos que necesitan sockets loopback (Gradle/Java),
+    bloqueados dentro del aislamiento de Claude Desktop. Solo Windows.
+
+    El .bat escribe la salida a <base>.out y, al terminar, el código de salida
+    a <base>.done. Esos archivos los lee tarea_consultar.
+    """
+    nombre = "witral_" + _uuid.uuid4().hex[:12]
+    base = _tarea_base(nombre)
+    salida, script, done = base + ".out", base + ".bat", base + ".done"
+
+    cd = f'cd /d "{cwd}"\r\n' if cwd else ""
+    with open(script, "w", encoding="utf-8") as f:
+        f.write("@echo off\r\n")
+        f.write(cd)
+        f.write(f'{comando} > "{salida}" 2>&1\r\n')
+        f.write(f'echo %ERRORLEVEL% > "{done}"\r\n')
+
+    inner = f'cmd /c "{script}"'
+    # /st futuro: schtasks rechaza una hora pasada. /run la dispara ya igual.
+    futuro = _time.strftime("%H:%M", _time.localtime(_time.time() + 120))
+
+    crear = _sch(["/create", "/tn", nombre, "/tr", inner,
+                  "/sc", "once", "/st", futuro, "/f"])
+    if crear.returncode != 0:
+        raise TransporteError("No se pudo crear la tarea: " + crear.stderr)
+    run = _sch(["/run", "/tn", nombre])
+    if run.returncode != 0:
+        _sch(["/delete", "/tn", nombre, "/f"])
+        raise TransporteError("No se pudo lanzar la tarea: " + run.stderr)
+    return nombre
+
+
+def tarea_consultar(nombre: str) -> dict:
+    """
+    Estado de una tarea lanzada con tarea_lanzar. Devuelve un dict con:
+      terminada (bool), codigo (int|None), salida (str), existe (bool).
+    'terminada' se basa en el archivo .done (fiable), no en el estado de schtasks.
+    """
+    base = _tarea_base(nombre)
+    salida, done = base + ".out", base + ".done"
+
+    q = _sch(["/query", "/tn", nombre, "/v", "/fo", "list"])
+    existe = q.returncode == 0
+
+    codigo = None
+    terminada = _os.path.exists(done)
+    if terminada:
+        try:
+            with open(done) as f:
+                codigo = int((f.read().strip() or "0"))
+        except (ValueError, OSError):
+            codigo = 0
+
+    texto = ""
+    try:
+        with open(salida, "r", encoding="utf-8", errors="replace") as f:
+            texto = f.read()
+    except FileNotFoundError:
+        pass
+
+    return {"existe": existe, "terminada": terminada,
+            "codigo": codigo, "salida": texto}
+
+
+def tarea_detener(nombre: str) -> bool:
+    """Detiene la ejecución en curso de la tarea (schtasks /end)."""
+    r = _sch(["/end", "/tn", nombre])
+    return r.returncode == 0
+
+
+def tarea_eliminar(nombre: str) -> bool:
+    """Borra la tarea y limpia sus archivos temporales (.out/.bat/.done)."""
+    _sch(["/end", "/tn", nombre])
+    r = _sch(["/delete", "/tn", nombre, "/f"])
+    base = _tarea_base(nombre)
+    for ext in (".out", ".bat", ".done"):
+        try:
+            _os.remove(base + ext)
+        except OSError:
+            pass
+    return r.returncode == 0
 
 
 def _quote(s: str) -> str:

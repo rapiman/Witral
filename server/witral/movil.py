@@ -52,13 +52,35 @@ def adb_relanzar(lugar: Lugar, serial: str, paquete: str) -> T.Resultado:
 
 # --- Gradle -----------------------------------------------------------------
 
-def gradle_task(lugar: Lugar, proyecto: str, tarea: str) -> T.Resultado:
+def gradle_build(lugar: Lugar, proyecto: str, tarea: str) -> str:
     """
-    Corre una tarea de build con el gradlew del proyecto. El proyecto es la cwd.
+    Compila con el gradlew del proyecto.
+
+    En local Windows el build necesita sockets loopback que el sandbox del
+    cliente MCP bloquea: se lanza como tarea programada (async) y se devuelve el
+    nombre de la tarea para seguirla con tarea_estado. En unix/remoto compila
+    síncrono y devuelve la salida.
     """
     if lugar.es_local:
         p = normalizar(lugar.raiz, proyecto)
-        if os.name == "nt":
-            return T.ejecutar(lugar, [str(p / "gradlew.bat"), tarea], cwd=str(p), timeout=1800)
-        return T.ejecutar(lugar, ["./gradlew", tarea], cwd=str(p), timeout=1800)
-    return T.ejecutar(lugar, f"cd '{proyecto}' && ./gradlew {tarea}", timeout=1800)
+        if lugar.es_windows:
+            # 'call' es necesario: sin él, cmd transfiere el control a
+            # gradlew.bat y no regresa al script, perdiendo la captura de salida.
+            comando = f'call "{p / "gradlew.bat"}" -p "{p}" {tarea}'
+            nombre = T.tarea_lanzar(comando, cwd=str(p))
+            return (
+                f"Build lanzado como tarea '{nombre}' (fuera del sandbox).\n"
+                f"Seguí el avance con tarea_estado('{nombre}'). "
+                f"Un build limpio puede tardar varios minutos."
+            )
+        salida = T.ejecutar(lugar, ["./gradlew", tarea], cwd=str(p), timeout=1800)
+        return _fmt_resultado(salida)
+    salida = T.ejecutar(lugar, f"cd '{proyecto}' && ./gradlew {tarea}", timeout=1800)
+    return _fmt_resultado(salida)
+
+
+def _fmt_resultado(r: T.Resultado) -> str:
+    cuerpo = (r.salida or "").rstrip()
+    if r.error:
+        cuerpo += ("\n--- stderr ---\n" + r.error.rstrip())
+    return f"[código {r.codigo}]\n{cuerpo}".rstrip()

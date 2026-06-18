@@ -11,6 +11,24 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 - `INSTALL.md`: guía de instalación paso a paso (requisitos, config, conexión a
   Claude Desktop, problemas frecuentes), enlazada desde el README.
+- **Tareas asíncronas fuera del sandbox** (solo local Windows): `tarea_crear`,
+  `tarea_estado`, `tarea_matar`, `tarea_borrar`. Ejecutan comandos como tarea
+  programada de Windows (`schtasks`), fuera del aislamiento del cliente MCP que
+  bloquea los sockets loopback. Lanzan y retornan al toque; el avance se sigue
+  con `tarea_estado` (la tarea escribe su salida a archivo y su código a un
+  `.done` al terminar). No bloquean el servidor.
+- `gradle_build`: compila con el `gradlew` del proyecto. En local Windows lanza
+  el build como tarea asíncrona (por el sandbox); en unix/remoto compila síncrono.
+
+### Cambiado
+
+- Subprocesos locales: el `stdin` pasa de `DEVNULL` a un pipe vacío (`input=""`),
+  para no romper el selector NIO de la JVM y mantener a git sin colgarse.
+
+### Eliminado
+
+- `gradle_task` y `run_no_sandbox` (experimental síncrono): reemplazados por
+  `gradle_build` y la familia `tarea_*`, que no bloquean el servidor.
 
 ## [0.2.0] - 2026-06-17
 

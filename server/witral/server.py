@@ -171,12 +171,36 @@ def editar_linea(archivo: str, desde: int, hasta: int, nuevo: str,
     """
     Reemplaza el rango de líneas [desde, hasta] por 'nuevo'. Inmune a CRLF/
     whitespace. Usar leer_rango antes para ubicar los números. Backup automático.
+    Devuelve el fragmento resultante para verificar en el acto.
+    Si dudás de la cuenta de líneas, preferí editar_anclado (verifica el contenido).
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
         return A.editar(lg, archivo, lineas=[A.EdicionLinea(desde, hasta, nuevo)])
+    except (RutaFueraDeRaiz, FileNotFoundError, A.EdicionError) as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
+def editar_anclado(archivo: str, desde: int, hasta: int, ancla: str, nuevo: str,
+                   donde: str = "local") -> str:
+    """
+    Reemplaza el rango [desde, hasta] por 'nuevo', PERO solo si el contenido
+    actual de esas líneas coincide con 'ancla' (comparación inmune a CRLF y a
+    espacios al borde). Si no coincide, aborta sin tocar el archivo y muestra
+    qué esperaba vs qué encontró. Es el modo de edición más seguro: une la
+    inmunidad a CRLF de editar_linea con una red contra perder la cuenta de
+    líneas. Preferilo cuando edites por número de línea. Devuelve el fragmento
+    resultante para verificar en el acto.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        return A.editar(lg, archivo,
+                        ancladas=[A.EdicionAnclada(desde, hasta, ancla, nuevo)])
     except (RutaFueraDeRaiz, FileNotFoundError, A.EdicionError) as e:
         return f"error: {e}"
 

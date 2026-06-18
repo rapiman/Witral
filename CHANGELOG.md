@@ -9,6 +9,13 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Añadido
 
+- `editar_anclado(archivo, desde, hasta, ancla, nuevo, donde)`: edición por rango que
+  **verifica** que el contenido actual coincida con un ancla esperada antes de tocar el
+  archivo; si no coincide, aborta y muestra esperado vs encontrado. Une la inmunidad a
+  CRLF de `editar_linea` con una red contra perder la cuenta de líneas. Es el modo de
+  edición más seguro.
+- `editar_linea` y `editar_anclado` ahora devuelven el fragmento resultante (líneas
+  editadas ± 2 de contexto), para verificar el cambio sin un `leer_rango` aparte.
 - `INSTALL.md`: guía de instalación paso a paso (requisitos, config, conexión a
   Claude Desktop, problemas frecuentes), enlazada desde el README.
 - `gradle_build`: compila con el `gradlew` del proyecto. En unix/remoto compila

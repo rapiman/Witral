@@ -134,8 +134,54 @@ class EdicionLinea:
     nuevo: str
 
 
+@dataclass
+class EdicionAnclada:
+    """
+    Edición por rango CON verificación de ancla: antes de reemplazar el rango
+    [desde, hasta], comprueba que su contenido actual coincide con 'ancla'
+    (ignorando espacios al borde y diferencias de CRLF). Si no coincide, aborta
+    sin tocar el archivo. Une la inmunidad a CRLF de la edición por línea con una
+    red de seguridad contra perder la cuenta de líneas.
+    """
+    desde: int
+    hasta: int
+    ancla: str
+    nuevo: str
+
+
 class EdicionError(Exception):
     pass
+
+
+def _norm_ancla(s: str) -> list[str]:
+    """Normaliza para comparar ancla: por línea, sin espacios al borde, sin vacías al final."""
+    lineas = [ln.strip() for ln in s.replace("\r\n", "\n").split("\n")]
+    while lineas and lineas[-1] == "":
+        lineas.pop()
+    return lineas
+
+
+def _aplicar_ancladas(texto: str, ediciones: list[EdicionAnclada], eol: str) -> str:
+    lineas = texto.split(eol)
+    total = len(lineas)
+    for ed in ediciones:
+        if ed.desde < 1 or ed.hasta < ed.desde or ed.hasta > total:
+            raise EdicionError(
+                f"Rango inválido {ed.desde}-{ed.hasta} (archivo tiene {total} líneas)."
+            )
+        actual = _norm_ancla(eol.join(lineas[ed.desde - 1: ed.hasta]))
+        esperado = _norm_ancla(ed.ancla)
+        if actual != esperado:
+            raise EdicionError(
+                f"El contenido en {ed.desde}-{ed.hasta} no coincide con el ancla "
+                f"esperada (no se editó nada).\n"
+                f"--- esperado ---\n" + "\n".join(esperado) +
+                f"\n--- actual ---\n" + "\n".join(actual)
+            )
+    # Reusar la mecánica de líneas: convertir a EdicionLinea ya validadas.
+    return _aplicar_lineas(
+        texto, [EdicionLinea(e.desde, e.hasta, e.nuevo) for e in ediciones], eol
+    )
 
 
 def _aplicar_literal(texto: str, ed: EdicionLiteral) -> str:
@@ -167,17 +213,20 @@ def _aplicar_lineas(texto: str, ediciones: list[EdicionLinea], eol: str) -> str:
 
 def editar(lugar: Lugar, ruta: str,
            literales: list[EdicionLiteral] | None = None,
-           lineas: list[EdicionLinea] | None = None) -> str:
+           lineas: list[EdicionLinea] | None = None,
+           ancladas: list[EdicionAnclada] | None = None) -> str:
     """
     Aplica ediciones a un archivo con validación en dos fases:
       1) Lee, detecta EOL, y valida TODAS las ediciones en memoria. Si algo
          falla, no escribe nada.
       2) Hace backup y escribe el resultado.
-    Se pueden combinar literales y por-línea en la misma llamada.
+    Se pueden combinar literales, por-línea y ancladas en la misma llamada.
+    Devuelve un resumen + el fragmento resultante alrededor de la edición.
     """
     literales = literales or []
     lineas = lineas or []
-    if not literales and not lineas:
+    ancladas = ancladas or []
+    if not literales and not lineas and not ancladas:
         raise EdicionError("No se especificó ninguna edición.")
 
     data = _leer_bytes(lugar, ruta)
@@ -188,20 +237,36 @@ def editar(lugar: Lugar, ruta: str,
     resultado = texto
     for ed in literales:
         resultado = _aplicar_literal(resultado, ed)
+    if ancladas:
+        resultado = _aplicar_ancladas(resultado, ancladas, eol)
     if lineas:
         resultado = _aplicar_lineas(resultado, lineas, eol)
 
     # Fase 2: backup + escritura, preservando el EOL original.
     bak = _backup(lugar, ruta, data)
-    # Normalizar saltos del resultado al EOL original.
     resultado_norm = resultado.replace("\r\n", "\n").replace("\n", eol)
     _escribir_bytes(lugar, ruta, resultado_norm.encode("utf-8"))
 
+    # Contexto post-edición: si hubo edición por rango, mostrar ese tramo
+    # (± 2 líneas) ya editado, para verificar en el acto sin un leer_rango aparte.
+    extracto = ""
+    rangos = [(e.desde, e.hasta) for e in lineas] + \
+             [(e.desde, e.hasta) for e in ancladas]
+    if rangos:
+        nuevas_lineas = resultado_norm.split(eol)
+        ini = max(1, min(d for d, _ in rangos) - 2)
+        fin = min(len(nuevas_lineas), max(h for _, h in rangos) + 2)
+        cuerpo = "\n".join(
+            f"{n}\t{nuevas_lineas[n - 1]}" for n in range(ini, fin + 1)
+        )
+        extracto = f"\n--- resultado ({ini}-{fin}) ---\n{cuerpo}"
+
     return (
         f"Editado {ruta} en {lugar.nombre} "
-        f"({len(literales)} literal(es), {len(lineas)} por-línea). "
+        f"({len(literales)} literal(es), {len(lineas)} por-línea, "
+        f"{len(ancladas)} anclada(s)). "
         f"EOL preservado: {'CRLF' if eol == chr(13)+chr(10) else 'LF'}. "
-        f"Backup: {bak}"
+        f"Backup: {bak}{extracto}"
     )
 
 

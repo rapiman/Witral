@@ -79,10 +79,6 @@ En local, los comandos corren por `subprocess`; en remoto, viajan por SSH (`para
 `matar_proceso` — mata por nombre/patrón (`taskkill`/`pkill`).
 `servicio` — status/start/stop/restart (`sc`/`systemctl`).
 
-**Tareas fuera del sandbox** (solo local Windows)
-Para procesos que necesitan sockets loopback (Java/Gradle), bloqueados dentro del aislamiento del cliente MCP. Se ejecutan como tarea programada de Windows y se siguen de forma asíncrona (lanzar → consultar → detener/borrar), sin bloquear el servidor.
-`tarea_crear` — lanza un comando como tarea y retorna su nombre al toque · `tarea_estado` — si terminó, código y salida capturada · `tarea_matar` — detiene la ejecución · `tarea_borrar` — borra la tarea y limpia temporales.
-
 **Base de datos**
 `psql` — consulta/sentencia sobre la base local de un lugar · `psql_aplicar` — aplica un `.sql` (migraciones).
 
@@ -96,7 +92,7 @@ Para procesos que necesitan sockets loopback (Java/Gradle), bloqueados dentro de
 `adb_devices` · `adb_shell` · `adb_install` · `adb_forcestop` · `adb_relanzar`
 
 **Build**
-`gradle_build` — compila con el `gradlew` del proyecto. En local Windows el build no puede correr dentro del sandbox (Gradle necesita loopback), así que se lanza como tarea y se sigue con `tarea_estado`; en unix/remoto compila síncrono y devuelve la salida.
+`gradle_build` — compila con el `gradlew` del proyecto. En unix/remoto compila y devuelve la salida. En local Windows el build no puede correr dentro del sandbox del cliente MCP (Gradle necesita sockets loopback): devuelve un aviso para compilar en una terminal propia y luego desplegar el APK con `adb_install`.
 
 **Búsqueda**
 `buscar_nombre` (por nombre de archivo) · `buscar_contenido` (grep de contenido).
@@ -224,7 +220,7 @@ En `claude_desktop_config.json`:
 ## Notas técnicas
 
 - **Transporte stdio y subprocesos.** Como el servidor habla por stdio, los subprocesos locales se lanzan con un `stdin` vacío (un pipe que recibe EOF inmediato, vía `input=""`) para que git no quede esperando un prompt invisible, y con `GIT_TERMINAL_PROMPT=0` por la misma razón. Se usa un pipe vacío y no `DEVNULL` porque la JVM necesita un `stdin` válido para su selector NIO.
-- **El sandbox del cliente y los sockets loopback.** Los procesos que el cliente MCP (p. ej. Claude Desktop) lanza heredan un aislamiento que **bloquea los sockets loopback** (AF_UNIX/`Selector.open()`). Por eso Gradle/Java fallan con *"Unable to establish loopback connection"* si se ejecutan directamente. La salida es correr esos comandos como **tarea programada de Windows** (`schtasks`), que se ejecuta fuera del aislamiento. Como un build puede tardar minutos y el servidor es síncrono, las tareas se manejan de forma **asíncrona**: `tarea_crear`/`gradle_build` lanzan y retornan al toque, y `tarea_estado` consulta el avance (la tarea escribe su salida a un archivo y su código de salida a un `.done` al terminar).
+- **El sandbox del cliente y los sockets loopback.** Los procesos que el cliente MCP (p. ej. Claude Desktop) lanza heredan un aislamiento que **bloquea los sockets loopback** (AF_UNIX/`Selector.open()`). Por eso Gradle/Java fallan con *"Unable to establish loopback connection"* cuando witral los ejecuta en local Windows. Se investigaron varias salidas —flags de proceso (`CREATE_BREAKAWAY_FROM_JOB`), capas de shell y, sobre todo, ejecutar el build como **tarea programada de Windows** (`schtasks`)— pero ninguna resultó fiable desde el contexto del MCP: las tareas que se pueden crear quedan en modo "Solo interactivo" y no ejecutan el comando, y las no interactivas (SYSTEM/LOCAL SERVICE) dan *Acceso denegado*. La conclusión práctica: **en local Windows el build se corre en una terminal propia** (`gradlew assembleDebug`), y witral se encarga del resto (desplegar el APK con `adb_install`, etc.). En unix/remoto no hay sandbox y `gradle_build` compila sin problema.
 - **Backups automáticos.** `editar_literal` y `editar_linea` guardan un `.bak` con timestamp antes de tocar el archivo.
 - **Papelera.** `borrar` no elimina: mueve a `.witral/papelera/` con timestamp (recuperable). `vaciar_papelera` sí es definitivo.
 - **Timeouts.** Las operaciones git cortan a los 20s para no dejar la sesión colgada.

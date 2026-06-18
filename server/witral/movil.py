@@ -56,22 +56,21 @@ def gradle_build(lugar: Lugar, proyecto: str, tarea: str) -> str:
     """
     Compila con el gradlew del proyecto.
 
-    En local Windows el build necesita sockets loopback que el sandbox del
-    cliente MCP bloquea: se lanza como tarea programada (async) y se devuelve el
-    nombre de la tarea para seguirla con tarea_estado. En unix/remoto compila
-    síncrono y devuelve la salida.
+    En unix/remoto compila síncrono y devuelve la salida. En local Windows NO
+    puede compilar: el build necesita sockets loopback que el sandbox del cliente
+    MCP bloquea (ver Notas técnicas del README). Devuelve un aviso para correr el
+    build en una terminal propia.
     """
     if lugar.es_local:
         p = normalizar(lugar.raiz, proyecto)
         if lugar.es_windows:
-            # 'call' es necesario: sin él, cmd transfiere el control a
-            # gradlew.bat y no regresa al script, perdiendo la captura de salida.
-            comando = f'call "{p / "gradlew.bat"}" -p "{p}" {tarea}'
-            nombre = T.tarea_lanzar(comando, cwd=str(p))
             return (
-                f"Build lanzado como tarea '{nombre}' (fuera del sandbox).\n"
-                f"Seguí el avance con tarea_estado('{nombre}'). "
-                f"Un build limpio puede tardar varios minutos."
+                "No puedo compilar desde acá: el sandbox del cliente MCP bloquea "
+                "los sockets loopback que Gradle/Java necesitan. Corré el build en "
+                "tu terminal:\n"
+                f'    cd "{p}"\n'
+                f"    .\\gradlew {tarea}\n"
+                "Una vez generado el APK, puedo desplegarlo con adb_install."
             )
         salida = T.ejecutar(lugar, ["./gradlew", tarea], cwd=str(p), timeout=1800)
         return _fmt_resultado(salida)

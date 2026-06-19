@@ -30,6 +30,16 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Corregido
 
+- **Modos de falla: fallar rápido y claro en vez de colgarse o engañar.**
+  - `psql`: agrega `-w` (nunca pedir password interactivo), `PGCONNECT_TIMEOUT=10`
+    y baja el timeout total a 60s. Si la base pide password y no hay credencial,
+    falla al instante en vez de colgarse minutos esperando un prompt.
+  - SSH: el fallo de conexión se traduce a un mensaje según su causa (host no
+    resuelve / conexión rechazada / autenticación rechazada / timeout) en vez de
+    un seco "timed out". Agrega `banner_timeout` y `auth_timeout`.
+  - `editar_literal`: si el bloque `viejo` no aparece pero el `nuevo` ya está
+    presente, avisa que la edición probablemente ya se aplicó, en vez de un seco
+    "no aparece" que induce a dudar.
 - Consistencia de rutas: `adb_install` (APK) y `psql_aplicar` (`.sql`) ahora
   normalizan la ruta en local igual que las tools de archivo (acepta relativa
   contra la raíz o absoluta, acotada a la raíz). Antes fallaban con rutas

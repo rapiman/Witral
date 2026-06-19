@@ -43,16 +43,22 @@ def _base_args(db: DBConfig) -> list[str]:
         args += ["-d", db.base]
     # Salida limpia para el modelo.
     args += ["-v", "ON_ERROR_STOP=1", "--no-psqlrc"]
+    # -w (--no-password): nunca pedir password interactivo. Si la base lo exige y
+    # no hay credencial, psql falla AL INSTANTE en vez de colgarse esperando un
+    # prompt que nadie va a responder (el cuelgue de 4 minutos).
+    args += ["-w"]
     return args
 
 
-def _entorno(db: DBConfig) -> dict | None:
+def _entorno(db: DBConfig) -> dict:
+    """Entorno para psql: timeout de conexión corto siempre, y PGPASSWORD si hay."""
+    import os
+    env = dict(os.environ)
+    # PGCONNECT_TIMEOUT: si el host no responde, abortar en ~10s en vez de colgarse.
+    env.setdefault("PGCONNECT_TIMEOUT", "10")
     if db.password:
-        import os
-        env = dict(os.environ)
         env["PGPASSWORD"] = db.password
-        return env
-    return None
+    return env
 
 
 def psql_comando(lugar: Lugar, comando: str) -> T.Resultado:
@@ -82,24 +88,25 @@ def psql_archivo(lugar: Lugar, ruta_sql: str) -> T.Resultado:
 
 def _correr(lugar: Lugar, db: DBConfig, args: list[str]) -> T.Resultado:
     if lugar.es_local:
-        # En local podemos pasar PGPASSWORD por entorno de forma controlada.
+        # Entorno con PGCONNECT_TIMEOUT (y PGPASSWORD si hay). Con -w en los args,
+        # si la base pide password y no hay credencial, psql falla al instante.
         env = _entorno(db)
-        if env is not None:
-            import subprocess
-            try:
-                proc = subprocess.run(
-                    args, capture_output=True, text=True, timeout=300, env=env
-                )
-                return T.Resultado(proc.returncode, proc.stdout, proc.stderr)
-            except subprocess.TimeoutExpired as e:
-                return T.Resultado(124, e.stdout or "", "timeout")
-        return T.ejecutar(lugar, args, timeout=300)
+        import subprocess
+        try:
+            proc = subprocess.run(
+                args, capture_output=True, text=True, timeout=60, env=env,
+                input="",
+            )
+            return T.Resultado(proc.returncode, proc.stdout, proc.stderr)
+        except subprocess.TimeoutExpired as e:
+            return T.Resultado(124, e.stdout or "",
+                               "timeout (60s): la base no respondió a tiempo")
     else:
         # En remoto, prefijar PGPASSWORD en la línea si hay password.
         linea = " ".join(_q(a) for a in args)
         if db.password:
             linea = f"PGPASSWORD={_q(db.password)} {linea}"
-        return T.ejecutar(lugar, linea, timeout=300)
+        return T.ejecutar(lugar, linea, timeout=60)
 
 
 def _q(s: str) -> str:

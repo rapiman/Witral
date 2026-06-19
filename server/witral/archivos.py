@@ -187,6 +187,14 @@ def _aplicar_ancladas(texto: str, ediciones: list[EdicionAnclada], eol: str) -> 
 def _aplicar_literal(texto: str, ed: EdicionLiteral) -> str:
     n = texto.count(ed.viejo)
     if n == 0:
+        # Si 'nuevo' ya está presente, lo más probable es que la edición ya se
+        # haya aplicado antes: avisarlo en vez de un seco "no aparece".
+        if ed.nuevo and ed.nuevo in texto:
+            raise EdicionError(
+                "El bloque 'viejo' no aparece, PERO el contenido 'nuevo' ya está "
+                "presente en el archivo: probablemente esta edición ya se aplicó. "
+                "Verificá con leer_rango antes de reintentar."
+            )
         raise EdicionError("El bloque 'viejo' no aparece en el archivo.")
     if n > 1:
         raise EdicionError(

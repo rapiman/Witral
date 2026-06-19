@@ -67,19 +67,45 @@ def _cliente_ssh(lugar: Lugar) -> "paramiko.SSHClient":
     ssh: SSHConfig = lugar.requiere_ssh()
     cli = paramiko.SSHClient()
     cli.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    cli.connect(
-        hostname=ssh.host,
-        port=ssh.puerto,
-        username=ssh.usuario,
-        key_filename=ssh.clave,
-        password=ssh.password,
-        passphrase=ssh.passphrase,
-        timeout=15,
-        allow_agent=True,
-        look_for_keys=ssh.clave is None,
-    )
+    destino = f"{ssh.usuario}@{ssh.host}:{ssh.puerto}"
+    try:
+        cli.connect(
+            hostname=ssh.host,
+            port=ssh.puerto,
+            username=ssh.usuario,
+            key_filename=ssh.clave,
+            password=ssh.password,
+            passphrase=ssh.passphrase,
+            timeout=15,
+            banner_timeout=15,
+            auth_timeout=15,
+            allow_agent=True,
+            look_for_keys=ssh.clave is None,
+        )
+    except Exception as e:
+        raise TransporteError(_diagnostico_ssh(e, destino)) from e
     _clientes[lugar.nombre] = cli
     return cli
+
+
+def _diagnostico_ssh(e: Exception, destino: str) -> str:
+    """Traduce el fallo de conexión SSH a un mensaje claro según su causa."""
+    import socket
+    nombre = type(e).__name__
+    if _HAY_PARAMIKO and isinstance(e, paramiko.AuthenticationException):
+        return (f"SSH a {destino}: autenticación rechazada. Revisá usuario, "
+                f"clave o password en lugares.json.")
+    if isinstance(e, socket.gaierror):
+        return (f"SSH a {destino}: el host no resuelve (DNS). Revisá el nombre "
+                f"del host o tu conexión/VPN.")
+    if isinstance(e, socket.timeout) or "timed out" in str(e).lower():
+        return (f"SSH a {destino}: timeout de conexión (15s). El host no "
+                f"responde: puede estar caído, bloqueado por firewall, o "
+                f"necesitás VPN.")
+    if isinstance(e, ConnectionRefusedError) or "refused" in str(e).lower():
+        return (f"SSH a {destino}: conexión rechazada. ¿El puerto es correcto y "
+                f"el servicio SSH está corriendo?")
+    return f"SSH a {destino}: fallo de conexión ({nombre}: {e})."
 
 
 def cerrar_todo() -> None:

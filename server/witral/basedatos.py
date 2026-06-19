@@ -70,6 +70,12 @@ def psql_archivo(lugar: Lugar, ruta_sql: str) -> T.Resultado:
     (el .sql ya llegó allí por git o copiar). Caso central de migraciones.
     """
     db = lugar.requiere_db()
+    # En local, normalizar la ruta como las tools de archivo (relativa contra la
+    # raíz o absoluta, acotada a la raíz), para que psql no la interprete desde
+    # su propio directorio. En remoto la ruta es del lado del lugar, tal cual.
+    if lugar.es_local:
+        from .seguridad import normalizar
+        ruta_sql = str(normalizar(lugar.raiz, ruta_sql))
     args = _base_args(db) + ["-f", ruta_sql]
     return _correr(lugar, db, args)
 

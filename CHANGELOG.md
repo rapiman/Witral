@@ -28,6 +28,13 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
   y devuelve la salida; en local Windows avisa que el build debe correrse en una
   terminal propia (ver más abajo).
 
+### Corregido
+
+- Consistencia de rutas: `adb_install` (APK) y `psql_aplicar` (`.sql`) ahora
+  normalizan la ruta en local igual que las tools de archivo (acepta relativa
+  contra la raíz o absoluta, acotada a la raíz). Antes fallaban con rutas
+  relativas porque adb/psql las interpretaban desde su propio directorio.
+
 ### Cambiado
 
 - Subprocesos locales: el `stdin` pasa de `DEVNULL` a un pipe vacío (`input=""`),

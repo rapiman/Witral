@@ -30,10 +30,15 @@ def adb_shell(lugar: Lugar, serial: str, comando: str) -> T.Resultado:
 
 
 def adb_install(lugar: Lugar, serial: str, apk: str, reemplazar: bool = True) -> T.Resultado:
+    # Normalizar el APK como las tools de archivo: acepta ruta relativa (la
+    # resuelve contra la raíz del lugar) o absoluta, y la acota a la raíz. Así
+    # adb recibe siempre una ruta absoluta y no falla por interpretarla desde
+    # su propio directorio de trabajo.
+    apk_abs = str(normalizar(lugar.raiz, apk)) if lugar.es_local else apk
     args = ["adb", "-s", serial, "install"]
     if reemplazar:
         args.append("-r")
-    args.append(apk)
+    args.append(apk_abs)
     return T.ejecutar(lugar, args, timeout=300)
 
 

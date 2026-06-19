@@ -50,6 +50,7 @@ Witral es un servidor [MCP](https://modelcontextprotocol.io) construido con **Fa
 | `movil.py` | ADB (dispositivos, shell, install, force-stop, relanzar) y tareas Gradle. |
 | `sistema.py` | Procesos y servicios, con sintaxis según el SO del lugar (windows/unix). |
 | `busqueda.py` | Búsqueda por nombre de archivo y por contenido (grep) en un proyecto. |
+| `sintaxis.py` | Verificación de sintaxis en dos capas (universal de balance + nativa por binario). |
 
 ### El eje `donde`
 
@@ -71,6 +72,8 @@ En local, los comandos corren por `subprocess`; en remoto, viajan por SSH (`para
 `leer` · `leer_rango` · `escribir` · `anexar` · `editar_literal` · `editar_linea` · `editar_anclado` · `listar` · `crear_carpeta` · `mover` · `borrar` (a papelera) · `vaciar_papelera` · `buscar_en_archivo`
 
 Tres modos de edición: `editar_literal` (texto exacto y único), `editar_linea` (por rango, inmune a CRLF) y `editar_anclado` (por rango **verificando** que el contenido coincida con un ancla esperada — el más seguro, aborta si no calza). Los dos por-rango devuelven el fragmento resultante para verificar en el acto.
+
+`verificar_sintaxis` — red rápida antes de mover o compilar, en dos capas: **universal** (balance de `()[]{}` y comillas/comentarios sin cerrar, para todos los lenguajes, local y remoto) y **nativa** (chequeo real con `node`/`python`/`perl`/etc. si está instalado, solo local). Reconoce kt, java, c, cpp, js, ts, php, py, sql, html, xml, css, sh, rb, pl y más.
 
 **Entre lugares**
 `copiar` — copia un archivo de un lugar a otro por SFTP.

@@ -28,6 +28,7 @@ from . import red as R
 from . import movil as M
 from . import sistema as S
 from . import busqueda as B
+from . import sintaxis as SX
 from .config import DestinoDesconocido
 from .seguridad import RutaFueraDeRaiz
 
@@ -124,6 +125,73 @@ def buscar_en_archivo(archivo: str, patron: str, donde: str = "local") -> str:
         return A.buscar_en_archivo(lg, archivo, patron)
     except (RutaFueraDeRaiz, FileNotFoundError) as e:
         return f"error: {e}"
+
+
+@mcp.tool()
+def verificar_sintaxis(archivo: str, donde: str = "local") -> str:
+    """
+    Verifica la sintaxis de un archivo en dos capas:
+    1) UNIVERSAL (siempre, todos los lenguajes): balance de ()[]{}, comillas y
+       comentarios sin cerrar, ignorando strings y comentarios. Atrapa el error
+       de edición más común. Funciona en local y remoto.
+    2) NATIVA (si la herramienta está instalada y el lugar es local): chequeo
+       real con el verificador del lenguaje (node --check, py_compile, php -l,
+       gcc -fsyntax-only, perl -c, ruby -c).
+    Reconoce: kt, kts, java, c, h, cpp, js, jsx, ts, php, py, sql, html, xml,
+    css, sh, rb, pl. No reemplaza al compilador: es una red rápida antes de
+    mover o compilar.
+    """
+    import os
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    ext = os.path.splitext(archivo)[1].lower()
+    lang = SX.EXTENSIONES.get(ext)
+    if not lang:
+        return (f"No tengo perfil de sintaxis para '{ext}'. "
+                f"Extensiones soportadas: {', '.join(sorted(SX.EXTENSIONES))}.")
+    # Leer el texto (local o remoto).
+    try:
+        texto = A.leer(lg, archivo)
+    except (RutaFueraDeRaiz, FileNotFoundError) as e:
+        return f"error: {e}"
+
+    # Capa 1: universal.
+    hallazgos = SX.revisar_balance(texto, lang)
+    partes = [f"Lenguaje: {lang.nombre}"]
+    if hallazgos:
+        partes.append("CAPA UNIVERSAL — problemas de balance:")
+        for h in hallazgos[:20]:
+            partes.append(f"  línea {h.linea}, col {h.columna}: {h.mensaje}")
+    else:
+        partes.append("CAPA UNIVERSAL — balance OK.")
+
+    # Capa 2: nativa (solo local, si hay binario).
+    if lg.es_local:
+        from .seguridad import normalizar
+        ruta_abs = str(normalizar(lg.raiz, archivo))
+        nat = SX.correr_nativo(ext, ruta_abs)
+        if nat is None:
+            bin_falta = SX.NATIVOS.get(ext)
+            if bin_falta:
+                partes.append(
+                    f"CAPA NATIVA — '{bin_falta.binario}' no está instalado; "
+                    f"sin verificación nativa para {ext}.")
+            else:
+                partes.append(
+                    f"CAPA NATIVA — no hay verificador nativo para {ext} "
+                    f"(solo capa universal).")
+        else:
+            ok, salida = nat
+            if ok:
+                partes.append("CAPA NATIVA — sintaxis OK.")
+            else:
+                partes.append("CAPA NATIVA — errores:")
+                partes.append(salida or "(sin detalle)")
+    else:
+        partes.append("CAPA NATIVA — omitida (lugar remoto; solo capa universal).")
+
+    return "\n".join(partes)
 
 
 @mcp.tool()

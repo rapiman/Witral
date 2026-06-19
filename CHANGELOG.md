@@ -9,6 +9,12 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Añadido
 
+- `verificar_sintaxis(archivo, donde)`: red rápida antes de mover o compilar, en dos
+  capas. **Universal** (siempre, todos los lenguajes): balance de `()[]{}`, comillas y
+  comentarios sin cerrar, ignorando strings y comentarios; funciona local y remoto.
+  **Nativa** (si el binario está y el lugar es local): chequeo real con `node`/`python`/
+  `php`/`gcc`/`perl`/`ruby`. Reconoce kt, kts, java, c, h, cpp, js, jsx, ts, php, py,
+  sql, html, xml, css, sh, rb, pl. Nuevo módulo `sintaxis.py`.
 - `editar_anclado(archivo, desde, hasta, ancla, nuevo, donde)`: edición por rango que
   **verifica** que el contenido actual coincida con un ancla esperada antes de tocar el
   archivo; si no coincide, aborta y muestra esperado vs encontrado. Une la inmunidad a

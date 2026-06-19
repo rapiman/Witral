@@ -88,6 +88,19 @@ CRLF/tabs/comillas, o si literal falló → `editar_anclado` (preferido) o `edit
 Entre los dos por-rango, `editar_anclado` es más seguro: la `ancla` evita editar el lugar
 equivocado si se perdió la cuenta de líneas.
 
+### Verificar sintaxis
+
+- `verificar_sintaxis(archivo, donde)` — red rápida antes de mover o compilar. Dos capas:
+  - **Universal (siempre, todos los lenguajes):** balance de `()[]{}`, comillas y
+    comentarios sin cerrar, ignorando lo que está dentro de strings y comentarios. Atrapa
+    el error de edición más común (un símbolo de más o sin cerrar). Funciona local y remoto.
+  - **Nativa (si el binario está instalado y el lugar es local):** chequeo real con el
+    verificador del lenguaje. Hoy en el local hay `node` (js/jsx), `python` (py) y `perl`
+    (pl); no hay `php`/`gcc`/`ruby`, así que esos quedan solo con la universal.
+  - Reconoce: kt, kts, java, c, h, cpp, js, jsx, ts, php, py, sql, html, xml, css, sh, rb, pl.
+  - No reemplaza al compilador. Para Kotlin (sin verificador nativo posible por el sandbox)
+    da solo la capa universal, que igual pilla el error de balance típico.
+
 ---
 
 ## Búsqueda

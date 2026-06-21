@@ -38,32 +38,48 @@ def buscar_nombre(lugar: Lugar, proyecto: str, patron: str) -> str:
     return r.salida or "(sin coincidencias)"
 
 
-def buscar_contenido(lugar: Lugar, proyecto: str, patron: str,
+def buscar_contenido(lugar: Lugar, objetivo: str, patron: str,
                      incluir: list[str] | None = None) -> str:
-    """grep de contenido (regex). Salida: ruta:linea: texto."""
+    """
+    grep de contenido (regex) en un ARCHIVO o una CARPETA/proyecto.
+    Si 'objetivo' es un archivo, busca solo ahí. Si es carpeta, recorre recursivo
+    aplicando los globs 'incluir'. Salida: ruta:linea: texto.
+    """
     incluir = incluir or _INCLUIR_DEFAULT
     if lugar.es_local:
-        base = normalizar(lugar.raiz, proyecto)
+        base = normalizar(lugar.raiz, objetivo)
         rx = re.compile(patron)
         out = []
-        for patron_glob in incluir:
-            for p in base.rglob(patron_glob):
-                if any(parte in _EXCLUIR for parte in p.parts):
-                    continue
-                if not p.is_file():
-                    continue
-                try:
-                    texto = p.read_text(encoding="utf-8", errors="replace")
-                except Exception:
-                    continue
-                for i, linea in enumerate(texto.splitlines(), start=1):
-                    if rx.search(linea):
-                        rel = p.relative_to(base)
-                        out.append(f"{rel}:{i}: {linea.strip()}")
+
+        def buscar_en(p, etiqueta):
+            try:
+                texto = p.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                return
+            for i, linea in enumerate(texto.splitlines(), start=1):
+                if rx.search(linea):
+                    out.append(f"{etiqueta}:{i}: {linea.strip()}")
+
+        if base.is_file():
+            # Objetivo es un archivo único: ignorar los globs 'incluir'.
+            buscar_en(base, base.name)
+        else:
+            for patron_glob in incluir:
+                for p in base.rglob(patron_glob):
+                    if any(parte in _EXCLUIR for parte in p.parts):
+                        continue
+                    if not p.is_file():
+                        continue
+                    buscar_en(p, p.relative_to(base))
         return "\n".join(out) if out else "(sin coincidencias)"
-    # remoto: grep -rn con --include
-    incl = " ".join(f"--include='{g}'" for g in incluir)
-    excl = " ".join(f"--exclude-dir='{e}'" for e in _EXCLUIR)
-    cmd = f"cd '{proyecto}' && grep -rnE {incl} {excl} '{patron}' ."
+    # remoto: si es archivo, grep directo; si es carpeta, grep -rn con --include.
+    chk = T.ejecutar(lugar, f"test -f '{objetivo}' && echo F || echo D")
+    es_archivo = (chk.salida or "").strip() == "F"
+    if es_archivo:
+        cmd = f"grep -nE '{patron}' '{objetivo}'"
+    else:
+        incl = " ".join(f"--include='{g}'" for g in incluir)
+        excl = " ".join(f"--exclude-dir='{e}'" for e in _EXCLUIR)
+        cmd = f"cd '{objetivo}' && grep -rnE {incl} {excl} '{patron}' ."
     r = T.ejecutar(lugar, cmd)
     return r.salida or "(sin coincidencias)"

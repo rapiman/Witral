@@ -29,6 +29,37 @@ def adb_shell(lugar: Lugar, serial: str, comando: str) -> T.Resultado:
     return T.ejecutar(lugar, ["adb", "-s", serial, "shell", comando])
 
 
+def adb_logcat(lugar: Lugar, serial: str, tags: str = "", nivel: str = "V",
+               lineas: int = 200, limpiar_antes: bool = False) -> T.Resultado:
+    """
+    Captura logcat del dispositivo en modo DUMP (-d): vuelca lo que hay y sale,
+    NO se queda en streaming (que colgaría la tool). 'tags': uno o varios tags
+    separados por coma (p. ej. "NavMenuOperacion,AnulacionScreen"); vacío = todo.
+    'nivel': mínimo (V/D/I/W/E). 'lineas': cuántas líneas finales devolver (tail).
+    'limpiar_antes': si True, hace 'logcat -c' antes para capturar solo lo nuevo
+    (útil: limpiar, reproducir el caso en el POS, luego capturar).
+    """
+    if limpiar_antes:
+        T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-c"])
+        return T.Resultado(0, "logcat limpiado. Reproducí el caso y volvé a "
+                              "llamar adb_logcat sin limpiar_antes para capturar.", "")
+    args = ["adb", "-s", serial, "logcat", "-d"]
+    if tags:
+        # Filtro por tag: "Tag:Nivel ... *:S" silencia el resto.
+        for t in [x.strip() for x in tags.split(",") if x.strip()]:
+            args.append(f"{t}:{nivel}")
+        args.append("*:S")
+    else:
+        args.append(f"*:{nivel}")
+    r = T.ejecutar(lugar, args, timeout=30)
+    # tail: quedarnos con las últimas 'lineas' para no inundar.
+    if r.ok and r.salida:
+        partes = r.salida.splitlines()
+        if len(partes) > lineas:
+            r = T.Resultado(r.codigo, "\n".join(partes[-lineas:]), r.error)
+    return r
+
+
 def adb_install(lugar: Lugar, serial: str, apk: str, reemplazar: bool = True) -> T.Resultado:
     # Normalizar el APK como las tools de archivo: acepta ruta relativa (la
     # resuelve contra la raíz del lugar) o absoluta, y la acota a la raíz. Así

@@ -92,38 +92,19 @@ def lugares() -> str:
 # --- Archivos ---------------------------------------------------------------
 
 @mcp.tool()
-def leer(archivo: str, donde: str = "local") -> str:
-    """Lee un archivo completo (chicos). Para grandes usar leer_rango."""
+def leer(archivo: str, desde: int = 0, hasta: int = 0, donde: str = "local") -> str:
+    """
+    Lee un archivo. Sin desde/hasta: archivo completo (chicos). Con desde/hasta:
+    solo ese rango de líneas, numeradas (forma correcta de mirar archivos grandes).
+    """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
+        if desde or hasta:
+            return A.leer_rango(lg, archivo, desde, hasta)
         return A.leer(lg, archivo)
-    except (RutaFueraDeRaiz, FileNotFoundError) as e:
-        return f"error: {e}"
-
-
-@mcp.tool()
-def leer_rango(archivo: str, desde: int, hasta: int, donde: str = "local") -> str:
-    """Lee líneas [desde, hasta] numeradas. Forma correcta de mirar archivos grandes."""
-    lg, aviso = _resolver(donde)
-    if aviso:
-        return aviso
-    try:
-        return A.leer_rango(lg, archivo, desde, hasta)
     except (RutaFueraDeRaiz, FileNotFoundError, ValueError) as e:
-        return f"error: {e}"
-
-
-@mcp.tool()
-def buscar_en_archivo(archivo: str, patron: str, donde: str = "local") -> str:
-    """Números de línea donde aparece 'patron' (regex) dentro de un archivo grande."""
-    lg, aviso = _resolver(donde)
-    if aviso:
-        return aviso
-    try:
-        return A.buscar_en_archivo(lg, archivo, patron)
-    except (RutaFueraDeRaiz, FileNotFoundError) as e:
         return f"error: {e}"
 
 
@@ -166,7 +147,24 @@ def verificar_sintaxis(archivo: str, donde: str = "local") -> str:
     else:
         partes.append("CAPA UNIVERSAL — balance OK.")
 
-    # Capa 2: nativa (solo local, si hay binario).
+    # Capa 2a: validación por librería Python (JSON/YAML/TOML). Opera sobre el
+    # texto, así que funciona local Y remoto.
+    lib = SX.validar_por_libreria(ext, texto)
+    if lib is not None:
+        ok, detalle = lib
+        if ok:
+            partes.append(f"CAPA NATIVA — {detalle}")
+        else:
+            partes.append("CAPA NATIVA — errores:")
+            partes.append(detalle)
+        return "\n".join(partes)
+    if ext in SX.LIBRERIA:
+        # Es un formato de datos pero la librería no está (yaml/toml).
+        partes.append(
+            f"CAPA NATIVA — librería para {ext} no disponible (solo capa universal).")
+        return "\n".join(partes)
+
+    # Capa 2b: nativa por binario (solo local, si está instalado).
     if lg.es_local:
         from .seguridad import normalizar
         ruta_abs = str(normalizar(lg.raiz, archivo))
@@ -219,6 +217,24 @@ def anexar(archivo: str, contenido: str, donde: str = "local") -> str:
 
 
 @mcp.tool()
+def convertir_eol(archivo: str, a: str, donde: str = "local") -> str:
+    """
+    Convierte el fin de línea de un archivo entero a LF o CRLF ('a'="lf"|"crlf").
+    Útil para pasar archivos clonados en Windows (CRLF) a LF para proyectos
+    Linux, o limpiar saltos mezclados. Hace backup. OJO: reescribe todo el
+    archivo, así que en git aparece como muchas líneas cambiadas (es esperado).
+    Para editar contenido NO se usa esto; las tools de edición preservan el EOL.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        return A.convertir_eol(lg, archivo, a)
+    except (RutaFueraDeRaiz, FileNotFoundError, A.EdicionError) as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
 def editar_literal(archivo: str, viejo: str, nuevo: str, donde: str = "local") -> str:
     """
     Reemplaza una ocurrencia EXACTA y única de 'viejo' por 'nuevo'. Falla si no
@@ -235,40 +251,28 @@ def editar_literal(archivo: str, viejo: str, nuevo: str, donde: str = "local") -
 
 @mcp.tool()
 def editar_linea(archivo: str, desde: int, hasta: int, nuevo: str,
-                 donde: str = "local") -> str:
+                 ancla: str = "", donde: str = "local") -> str:
     """
     Reemplaza el rango de líneas [desde, hasta] por 'nuevo'. Inmune a CRLF/
-    whitespace. Usar leer_rango antes para ubicar los números. Backup automático.
-    Devuelve el fragmento resultante para verificar en el acto.
-    Si dudás de la cuenta de líneas, preferí editar_anclado (verifica el contenido).
+    whitespace. Backup automático y devuelve el fragmento resultante para
+    verificar en el acto.
+
+    PARÁMETRO 'ancla' (muy recomendado): si lo pasás con el contenido que
+    ESPERÁS que tengan esas líneas, la edición se aplica SOLO si coincide
+    (comparación inmune a CRLF/espacios); si no coincide, aborta sin tocar el
+    archivo y muestra esperado vs encontrado. Es la red de seguridad contra
+    perder la cuenta de líneas. Sin 'ancla', edita el rango directo confiando
+    en los números. Usá leer_rango antes para ubicar las líneas, y pasá 'ancla'
+    siempre que puedas.
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
+        if ancla:
+            return A.editar(lg, archivo,
+                            ancladas=[A.EdicionAnclada(desde, hasta, ancla, nuevo)])
         return A.editar(lg, archivo, lineas=[A.EdicionLinea(desde, hasta, nuevo)])
-    except (RutaFueraDeRaiz, FileNotFoundError, A.EdicionError) as e:
-        return f"error: {e}"
-
-
-@mcp.tool()
-def editar_anclado(archivo: str, desde: int, hasta: int, ancla: str, nuevo: str,
-                   donde: str = "local") -> str:
-    """
-    Reemplaza el rango [desde, hasta] por 'nuevo', PERO solo si el contenido
-    actual de esas líneas coincide con 'ancla' (comparación inmune a CRLF y a
-    espacios al borde). Si no coincide, aborta sin tocar el archivo y muestra
-    qué esperaba vs qué encontró. Es el modo de edición más seguro: une la
-    inmunidad a CRLF de editar_linea con una red contra perder la cuenta de
-    líneas. Preferilo cuando edites por número de línea. Devuelve el fragmento
-    resultante para verificar en el acto.
-    """
-    lg, aviso = _resolver(donde)
-    if aviso:
-        return aviso
-    try:
-        return A.editar(lg, archivo,
-                        ancladas=[A.EdicionAnclada(desde, hasta, ancla, nuevo)])
     except (RutaFueraDeRaiz, FileNotFoundError, A.EdicionError) as e:
         return f"error: {e}"
 
@@ -635,20 +639,16 @@ def git_init(repo: str, rama: str = "main", donde: str = "local") -> str:
 
 
 @mcp.tool()
-def git_remote_add(repo: str, nombre: str, url: str, donde: str = "local") -> str:
-    """Agrega un remoto al repo (git remote add <nombre> <url>)."""
+def git_remote(repo: str, nombre: str = "", url: str = "", donde: str = "local") -> str:
+    """
+    Gestiona remotos del repo. Sin 'nombre'/'url': lista los remotos con sus URLs
+    (git remote -v). Con 'nombre' y 'url': agrega un remoto (git remote add).
+    """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
-    return _fmt(G.remote_add(lg, repo, nombre, url))
-
-
-@mcp.tool()
-def git_remote(repo: str, donde: str = "local") -> str:
-    """Lista los remotos del repo con sus URLs (git remote -v)."""
-    lg, aviso = _resolver(donde)
-    if aviso:
-        return aviso
+    if nombre and url:
+        return _fmt(G.remote_add(lg, repo, nombre, url))
     return _fmt(G.remote_list(lg, repo))
 
 
@@ -754,6 +754,22 @@ def adb_relanzar(serial: str, paquete: str, donde: str = "local") -> str:
     return _fmt(M.adb_relanzar(lg, serial, paquete))
 
 
+@mcp.tool()
+def adb_logcat(serial: str, tags: str = "", nivel: str = "V", lineas: int = 200,
+               limpiar_antes: bool = False, donde: str = "local") -> str:
+    """
+    Captura logcat del dispositivo (modo dump: vuelca y sale, no streaming).
+    'tags': tags separados por coma para filtrar (ej. "NavMenuOperacion,Anulacion");
+    vacío = todo. 'nivel': mínimo V/D/I/W/E. 'lineas': últimas N líneas (tail).
+    'limpiar_antes': limpia el buffer para capturar solo lo nuevo (flujo: limpiar,
+    reproducir el caso en el POS, volver a llamar sin limpiar_antes).
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return _fmt(M.adb_logcat(lg, serial, tags, nivel, lineas, limpiar_antes))
+
+
 # --- Gradle -----------------------------------------------------------------
 
 @mcp.tool()
@@ -790,20 +806,22 @@ def buscar_nombre(proyecto: str, patron: str, donde: str = "local") -> str:
 
 
 @mcp.tool()
-def buscar_contenido(proyecto: str, patron: str, incluir: str = "",
+def buscar_contenido(objetivo: str, patron: str, incluir: str = "",
                      donde: str = "local") -> str:
     """
-    grep de contenido (regex) en un proyecto. 'incluir': globs separados por
-    espacio (por defecto *.kt *.java *.xml *.kts *.gradle). Salida ruta:linea: texto.
+    grep de contenido (regex) en un ARCHIVO o una CARPETA/proyecto.
+    Si 'objetivo' es un archivo, busca solo en él (reemplaza al viejo
+    buscar_en_archivo). Si es carpeta, recorre recursivo aplicando 'incluir'
+    (globs separados por espacio; por defecto *.kt *.java *.xml *.kts *.gradle).
+    Salida: ruta:linea: texto.
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
-        return B.buscar_contenido(lg, proyecto, patron, incluir.split() if incluir else None)
+        return B.buscar_contenido(lg, objetivo, patron, incluir.split() if incluir else None)
     except RutaFueraDeRaiz as e:
         return f"error: {e}"
-
 
 def main():
     mcp.run()

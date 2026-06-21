@@ -33,12 +33,15 @@ def es_destructivo(sql: str) -> bool:
 
 def _base_args(db: DBConfig) -> list[str]:
     args = [db.cliente]
-    if db.host:
-        args += ["-h", db.host]
-    if db.puerto:
-        args += ["-p", str(db.puerto)]
-    if db.usuario:
-        args += ["-U", db.usuario]
+    # Modo peer (db.como): conexión por socket local como usuario del sistema.
+    # No se pasan -h/-U: psql usa el socket Unix y el rol del usuario del SO.
+    if not db.como:
+        if db.host:
+            args += ["-h", db.host]
+        if db.puerto:
+            args += ["-p", str(db.puerto)]
+        if db.usuario:
+            args += ["-U", db.usuario]
     if db.base:
         args += ["-d", db.base]
     # Salida limpia para el modelo.
@@ -102,9 +105,13 @@ def _correr(lugar: Lugar, db: DBConfig, args: list[str]) -> T.Resultado:
             return T.Resultado(124, e.stdout or "",
                                "timeout (60s): la base no respondió a tiempo")
     else:
-        # En remoto, prefijar PGPASSWORD en la línea si hay password.
         linea = " ".join(_q(a) for a in args)
-        if db.password:
+        if db.como:
+            # Peer auth: ejecutar como el usuario del sistema vía sudo. Sin
+            # password TCP; psql usa el socket local con el rol de ese usuario.
+            linea = f"sudo -u {_q(db.como)} {linea}"
+        elif db.password:
+            # Prefijar PGPASSWORD en la línea si hay password.
             linea = f"PGPASSWORD={_q(db.password)} {linea}"
         return T.ejecutar(lugar, linea, timeout=60)
 

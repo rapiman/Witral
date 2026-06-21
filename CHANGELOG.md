@@ -9,6 +9,29 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Añadido
 
+- `convertir_eol(archivo, a, donde)`: convierte el fin de línea de un archivo entero a
+  LF o CRLF. Para pasar archivos clonados en Windows a LF, o limpiar saltos mezclados.
+- `adb_logcat(serial, tags, nivel, lineas, limpiar_antes, donde)`: captura logcat del
+  dispositivo en modo dump (vuelca y sale, no streaming), con filtro por tag y nivel,
+  tail de líneas y opción de limpiar el buffer antes. Cierra el ciclo de logs del POS
+  sin copiar/pegar a mano.
+- `verificar_sintaxis`: agrega perfiles JSON/YAML/TOML con validación nativa por librería
+  Python (json/pyyaml/tomllib), que da línea y columna del error y funciona local y remoto.
+
+### Cambiado
+
+- **Fusiones de tools** (menos superficie, mejor descubrimiento):
+  - `leer` absorbe a `leer_rango`: `leer(archivo, desde, hasta)` con rango opcional
+    (sin rango = archivo completo).
+  - `editar_linea` absorbe a `editar_anclado`: parámetro `ancla` opcional; con ancla
+    verifica el contenido antes de editar, sin ancla edita directo.
+  - `buscar_contenido` absorbe a `buscar_en_archivo`: el parámetro `objetivo` acepta un
+    archivo o una carpeta; siempre devuelve `ruta:linea: texto`.
+  - `git_remote` absorbe a `git_remote_add`: sin `nombre`/`url` lista, con ellos agrega.
+- `editar_literal`: ahora normaliza saltos de línea (solo si el archivo es CRLF) antes de
+  comparar, así no falla con bloques multilínea cuando el archivo tiene CRLF y el `viejo`
+  viene en LF. Era la fricción nº1 de uso.
+
 - `verificar_sintaxis(archivo, donde)`: red rápida antes de mover o compilar, en dos
   capas. **Universal** (siempre, todos los lenguajes): balance de `()[]{}`, comillas y
   comentarios sin cerrar, ignorando strings y comentarios; funciona local y remoto.

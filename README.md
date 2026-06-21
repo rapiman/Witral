@@ -69,9 +69,9 @@ En local, los comandos corren por `subprocess`; en remoto, viajan por SSH (`para
 `lugares` — lista los destinos definidos (sin exponer secretos).
 
 **Archivos** (eje `donde`)
-`leer` · `leer_rango` · `escribir` · `anexar` · `editar_literal` · `editar_linea` · `editar_anclado` · `listar` · `crear_carpeta` · `mover` · `borrar` (a papelera) · `vaciar_papelera` · `buscar_en_archivo`
+`leer` (rango opcional) · `escribir` · `anexar` · `convertir_eol` · `editar_literal` · `editar_linea` (ancla opcional) · `listar` · `crear_carpeta` · `mover` · `borrar` (a papelera) · `vaciar_papelera`
 
-Tres modos de edición: `editar_literal` (texto exacto y único), `editar_linea` (por rango, inmune a CRLF) y `editar_anclado` (por rango **verificando** que el contenido coincida con un ancla esperada — el más seguro, aborta si no calza). Los dos por-rango devuelven el fragmento resultante para verificar en el acto.
+Dos modos de edición: `editar_literal` (texto exacto y único, inmune a CRLF) y `editar_linea` (por rango; con el parámetro `ancla` **verifica** que el contenido coincida antes de editar y aborta si no calza — la opción segura recomendada). `editar_linea` devuelve el fragmento resultante para verificar en el acto. `convertir_eol` pasa un archivo entre LF y CRLF.
 
 `verificar_sintaxis` — red rápida antes de mover o compilar, en dos capas: **universal** (balance de `()[]{}` y comillas/comentarios sin cerrar, para todos los lenguajes, local y remoto) y **nativa** (chequeo real con `node`/`python`/`perl`/etc. si está instalado, solo local). Reconoce kt, java, c, cpp, js, ts, php, py, sql, html, xml, css, sh, rb, pl y más.
 
@@ -88,13 +88,13 @@ Tres modos de edición: `editar_literal` (texto exacto y único), `editar_linea`
 `psql` — consulta/sentencia sobre la base local de un lugar · `psql_aplicar` — aplica un `.sql` (migraciones).
 
 **Git**
-`git_init` · `git_status` · `git_log` · `git_diff` · `git_branch` · `git_show` · `git_pull` · `git_add` · `git_commit` · `git_push` · `git_reset_hard` · `git_remote` · `git_remote_add` · `git_identidad`
+`git_init` · `git_status` · `git_log` · `git_diff` · `git_branch` · `git_show` · `git_pull` · `git_fetch` · `git_add` · `git_commit` · `git_push` · `git_reset_hard` · `git_remote` (lista o agrega) · `git_identidad`
 
 **Red**
 `ping` · `http_request` · `tcp_socket`
 
 **Android / ADB**
-`adb_devices` · `adb_shell` · `adb_install` · `adb_forcestop` · `adb_relanzar`
+`adb_devices` · `adb_shell` · `adb_install` · `adb_forcestop` · `adb_relanzar` · `adb_logcat` (dump filtrado por tag)
 
 **Build**
 `gradle_build` — compila con el `gradlew` del proyecto. En unix/remoto compila y devuelve la salida. En local Windows el build no puede correr dentro del sandbox del cliente MCP (Gradle necesita sockets loopback): devuelve un aviso para compilar en una terminal propia y luego desplegar el APK con `adb_install`.
@@ -226,7 +226,7 @@ En `claude_desktop_config.json`:
 
 - **Transporte stdio y subprocesos.** Como el servidor habla por stdio, los subprocesos locales se lanzan con un `stdin` vacío (un pipe que recibe EOF inmediato, vía `input=""`) para que git no quede esperando un prompt invisible, y con `GIT_TERMINAL_PROMPT=0` por la misma razón. Se usa un pipe vacío y no `DEVNULL` porque la JVM necesita un `stdin` válido para su selector NIO.
 - **El sandbox del cliente y los sockets loopback.** Los procesos que el cliente MCP (p. ej. Claude Desktop) lanza heredan un aislamiento que **bloquea los sockets loopback** (AF_UNIX/`Selector.open()`). Por eso Gradle/Java fallan con *"Unable to establish loopback connection"* cuando witral los ejecuta en local Windows. Se investigaron varias salidas —flags de proceso (`CREATE_BREAKAWAY_FROM_JOB`), capas de shell y, sobre todo, ejecutar el build como **tarea programada de Windows** (`schtasks`)— pero ninguna resultó fiable desde el contexto del MCP: las tareas que se pueden crear quedan en modo "Solo interactivo" y no ejecutan el comando, y las no interactivas (SYSTEM/LOCAL SERVICE) dan *Acceso denegado*. La conclusión práctica: **en local Windows el build se corre en una terminal propia** (`gradlew assembleDebug`), y witral se encarga del resto (desplegar el APK con `adb_install`, etc.). En unix/remoto no hay sandbox y `gradle_build` compila sin problema.
-- **Backups automáticos.** `editar_literal`, `editar_linea` y `editar_anclado` guardan un `.bak` con timestamp antes de tocar el archivo.
+- **Backups automáticos.** `editar_literal`, `editar_linea` y `convertir_eol` guardan un `.bak` con timestamp antes de tocar el archivo.
 - **Papelera.** `borrar` no elimina: mueve a `.witral/papelera/` con timestamp (recuperable). `vaciar_papelera` sí es definitivo.
 - **Timeouts.** Las operaciones git cortan a los 20s para no dejar la sesión colgada.
 

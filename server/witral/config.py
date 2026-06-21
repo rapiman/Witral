@@ -53,6 +53,11 @@ class DBConfig:
     password: str | None = None
     # Cómo invocar el cliente en ese lugar; por defecto "psql".
     cliente: str = "psql"
+    # Autenticación "peer" (socket local + usuario del sistema): si se define,
+    # el comando se ejecuta como `sudo -u <como> psql ...` y se omiten -h/-U
+    # (psql conecta por socket Unix como ese usuario del SO). Para bases que no
+    # usan password TCP, p. ej. un postgres de dev con peer auth. Solo remoto/unix.
+    como: str | None = None
 
 
 @dataclass
@@ -133,6 +138,7 @@ def _parse_db(d: dict) -> DBConfig:
         usuario=d.get("usuario"),
         password=d.get("password"),
         cliente=d.get("cliente", "psql"),
+        como=d.get("como"),
     )
 
 

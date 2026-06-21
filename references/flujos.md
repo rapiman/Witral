@@ -21,8 +21,8 @@ Objetivo: un cambio de esquema/datos hecho en local llega y se aplica en dev y p
    explícito del usuario.
 
 Notas:
-- Si el `.sql` es grande, revisarlo antes con `leer_rango` / `buscar_en_archivo` en vez de
-  cargarlo entero.
+- Si el `.sql` es grande, revisarlo antes con `leer` (con rango) / `buscar_contenido` en
+  vez de cargarlo entero.
 - Nunca aplicar en prod sin haber verificado en dev primero.
 
 ## Promover archivos web (`/var/www/html`)
@@ -41,10 +41,10 @@ Igual al anterior, sin el paso de base.
 
 Sin tool dedicada: combinar acciones de archivo.
 
-1. `buscar_en_archivo(archivo, "<marca de inicio del bloque>", donde)` → número de línea.
-2. `leer_rango(archivo, desde, hasta, donde)` para revisar ese tramo (avanzar por tramos
+1. `buscar_contenido(archivo, "<marca de inicio del bloque>", donde)` → número de línea.
+2. `leer(archivo, donde, desde, hasta)` para revisar ese tramo (avanzar por tramos
    si hace falta, sin cargar el archivo entero).
-3. Para extraer a un archivo nuevo: `leer_rango` el bloque y `escribir`/`anexar` al
+3. Para extraer a un archivo nuevo: `leer` el bloque (con rango) y `escribir`/`anexar` al
    destino, por tramos si es muy grande.
 
 Esto cubre el caso de sacar bloques (p. ej. una base concreta) de un volcado `.sql`

@@ -61,6 +61,12 @@ EXTENSIONES: dict[str, Lenguaje] = {
     ".sh":    Lenguaje("Shell", coment_linea=("#",), comillas=('"', "'")),
     ".rb":    Lenguaje("Ruby", coment_linea=("#",), comillas=('"', "'")),
     ".pl":    Lenguaje("Perl", coment_linea=("#",), comillas=('"', "'")),
+    # JSON no tiene comentarios ni comillas simples (solo dobles); la validación
+    # real la hace la capa nativa con json.loads.
+    ".json":  Lenguaje("JSON", comillas=('"',)),
+    ".yaml":  Lenguaje("YAML", coment_linea=("#",), comillas=('"', "'")),
+    ".yml":   Lenguaje("YAML", coment_linea=("#",), comillas=('"', "'")),
+    ".toml":  Lenguaje("TOML", coment_linea=("#",), comillas=('"', "'")),
 }
 
 
@@ -249,3 +255,53 @@ def correr_nativo(ext: str, ruta_local: str) -> tuple[bool, str] | None:
         return (p.returncode == 0, salida)
     except Exception as e:  # noqa
         return (False, f"error al correr {v.binario}: {e}")
+
+
+# Formatos de datos que se validan con una librería Python (no un binario): la
+# validación corre sobre el texto directamente, así que sirve local Y remoto.
+LIBRERIA: dict[str, str] = {
+    ".json": "json",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+}
+
+
+def validar_por_libreria(ext: str, texto: str) -> tuple[bool, str] | None:
+    """
+    Valida JSON/YAML/TOML parseando el texto con la librería correspondiente.
+    Devuelve (ok, detalle) o None si la extensión no aplica o la librería no
+    está disponible. Funciona en cualquier lugar porque opera sobre el texto.
+    """
+    cual = LIBRERIA.get(ext)
+    if cual == "json":
+        import json
+        # Tolerar BOM (igual que witral lee sus configs con utf-8-sig): un BOM
+        # al inicio no es un error real de JSON para este entorno.
+        limpio = texto.lstrip("\ufeff")
+        try:
+            json.loads(limpio)
+            return (True, "JSON válido.")
+        except json.JSONDecodeError as e:
+            return (False, f"línea {e.lineno}, col {e.colno}: {e.msg}")
+    if cual == "yaml":
+        try:
+            import yaml
+        except ImportError:
+            return None  # pyyaml no instalado -> solo capa universal
+        try:
+            yaml.safe_load(texto)
+            return (True, "YAML válido.")
+        except yaml.YAMLError as e:
+            return (False, str(e))
+    if cual == "toml":
+        try:
+            import tomllib  # stdlib desde Python 3.11
+        except ImportError:
+            return None
+        try:
+            tomllib.loads(texto)
+            return (True, "TOML válido.")
+        except tomllib.TOMLDecodeError as e:
+            return (False, str(e))
+    return None

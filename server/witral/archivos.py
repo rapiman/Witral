@@ -185,6 +185,12 @@ def _aplicar_ancladas(texto: str, ediciones: list[EdicionAnclada], eol: str) -> 
 
 
 def _aplicar_literal(texto: str, ed: EdicionLiteral) -> str:
+    # Normalizar saltos en ambos lados a LF: el 'texto' ya viene en LF desde
+    # editar(), pero el 'viejo'/'nuevo' que llegan podrían traer CRLF. Así la
+    # comparación es inmune al tipo de salto de línea.
+    viejo = ed.viejo.replace("\r\n", "\n")
+    nuevo = ed.nuevo.replace("\r\n", "\n")
+    ed = EdicionLiteral(viejo, nuevo)
     n = texto.count(ed.viejo)
     if n == 0:
         # Si 'nuevo' ya está presente, lo más probable es que la edición ya se
@@ -241,14 +247,24 @@ def editar(lugar: Lugar, ruta: str,
     texto = _decodificar(data)
     eol = _detectar_eol(texto)
 
+    # Normalizar a LF SOLO si el archivo usa CRLF: así editar_literal compara
+    # contra texto en LF y no falla cuando el archivo tiene CRLF pero el 'viejo'
+    # viene en LF (la fricción nº1). Si el archivo ya está en LF (Linux y muchos
+    # de Windows) no se toca: cero trabajo extra. La Fase 2 re-aplica el EOL
+    # original al escribir, así que los CRLF del archivo se preservan igual.
+    if eol == "\r\n":
+        texto = texto.replace("\r\n", "\n")
+
     # Fase 1: validar y construir el resultado en memoria.
     resultado = texto
     for ed in literales:
         resultado = _aplicar_literal(resultado, ed)
     if ancladas:
-        resultado = _aplicar_ancladas(resultado, ancladas, eol)
+        # Trabajamos en LF: las funciones internas splitean por "\n", no por el
+        # EOL original (que solo se re-aplica al escribir, en la Fase 2).
+        resultado = _aplicar_ancladas(resultado, ancladas, "\n")
     if lineas:
-        resultado = _aplicar_lineas(resultado, lineas, eol)
+        resultado = _aplicar_lineas(resultado, lineas, "\n")
 
     # Fase 2: backup + escritura, preservando el EOL original.
     bak = _backup(lugar, ruta, data)
@@ -276,6 +292,37 @@ def editar(lugar: Lugar, ruta: str,
         f"EOL preservado: {'CRLF' if eol == chr(13)+chr(10) else 'LF'}. "
         f"Backup: {bak}{extracto}"
     )
+
+
+def convertir_eol(lugar: Lugar, ruta: str, a: str) -> str:
+    """
+    Convierte el fin de línea de un archivo entero a LF o CRLF.
+    'a' debe ser "lf" o "crlf". Hace backup antes. Reescribe todo el archivo,
+    así que en git aparecerá como muchas líneas cambiadas (es lo esperado al
+    convertir). Para ediciones normales NO se usa esto: las tools de edición
+    preservan el EOL existente.
+    """
+    objetivo = a.strip().lower()
+    if objetivo not in ("lf", "crlf"):
+        raise EdicionError("El parámetro 'a' debe ser 'lf' o 'crlf'.")
+    nuevo_eol = "\n" if objetivo == "lf" else "\r\n"
+
+    data = _leer_bytes(lugar, ruta)
+    texto = _decodificar(data)
+    eol_actual = _detectar_eol(texto)
+
+    # Normalizar a LF y luego aplicar el objetivo (maneja archivos mezclados).
+    lf = texto.replace("\r\n", "\n")
+    resultado = lf.replace("\n", nuevo_eol) if objetivo == "crlf" else lf
+
+    if resultado.encode("utf-8") == data:
+        return (f"{ruta} ya estaba en {objetivo.upper()}; no se cambió nada.")
+
+    bak = _backup(lugar, ruta, data)
+    _escribir_bytes(lugar, ruta, resultado.encode("utf-8"))
+    antes = "CRLF" if eol_actual == "\r\n" else "LF"
+    return (f"Convertido {ruta} en {lugar.nombre}: {antes} -> {objetivo.upper()}. "
+            f"Backup: {bak}")
 
 
 # --- Listado / info / carpetas ---------------------------------------------

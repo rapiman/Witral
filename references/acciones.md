@@ -68,7 +68,8 @@ Acotados a la raíz autorizada en local; a las rutas del lugar en remoto. Soport
   con rango antes). El parámetro **`ancla` (recomendado)** es la red de seguridad: si lo
   pasás con el contenido que ESPERÁS en esas líneas, edita solo si coincide; si no, **aborta
   sin tocar el archivo** y muestra esperado vs encontrado. Sin `ancla`, edita directo
-  confiando en los números. Pasá `ancla` siempre que puedas.
+confiando en los números. Pasá `ancla` siempre que puedas. Con `verificar=True` corre
+  `verificar_sintaxis` tras editar y agrega el resultado en la misma respuesta (al editar código).
 - `convertir_eol(archivo, a, donde)` — convierte el fin de línea del archivo entero a `lf`
   o `crlf`. Para editar contenido NO se usa (las tools de edición preservan el EOL).
 - `mover(origen, destino, donde)` — mover/renombrar **dentro de un mismo lugar** (no
@@ -145,11 +146,16 @@ Tools disponibles hoy: `git_init`, `git_status`, `git_log`, `git_diff`, `git_bra
   `git_commit` → `git_push` (publicar desde un lugar). `pull` benigno; `push` publica
   → confirmar. `git_push` hace `--set-upstream` solo si falta, y acepta `forzar` (usa
   `--force-with-lease`).
+- **Atajo (recomendado):** `git_publicar(repo, mensaje, donde, rutas, empujar, forzar,
+  confirmado)` hace `status → add → diff --stat → commit → push` en una sola pasada,
+  muestra el diff antes del commit y para si un paso falla. Reemplaza encadenar las cinco
+  a mano. `empujar=False` = commit solo local; al empujar pide `confirmado=True`.
 - **Identidad:** `git_identidad(repo, identidad, donde)` fija el autor de los commits
   (user.name/email) según la identidad nombrada en config. No toca remoto ni credenciales.
 - **Destructivo (confirmación reforzada):** `git_reset_hard`, reescribir historia.
 
-**Flujo de commit recomendado:** `git_status` (ver qué cambió) → `git_add` →
+**Flujo de commit:** lo normal es `git_publicar(repo, mensaje, confirmado=True)` en una
+llamada. A mano (si se quiere granularidad): `git_status` (ver qué cambió) → `git_add` →
 `git_diff` (revisar) → `git_commit` → `git_push`. No inferir el estado desde `git_log`:
 para eso está `git_status`.
 

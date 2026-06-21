@@ -72,18 +72,6 @@ def leer_rango(lugar: Lugar, ruta: str, desde: int, hasta: int) -> str:
     )
 
 
-def buscar_en_archivo(lugar: Lugar, ruta: str, patron: str) -> str:
-    """Números de línea donde aparece 'patron' (regex) dentro de UN archivo."""
-    import re
-    rx = re.compile(patron)
-    texto = _decodificar(_leer_bytes(lugar, ruta))
-    out = []
-    for i, linea in enumerate(texto.splitlines(), start=1):
-        if rx.search(linea):
-            out.append(f"{i}\t{linea}")
-    return "\n".join(out) if out else "(sin coincidencias)"
-
-
 # --- Escritura simple -------------------------------------------------------
 
 def escribir(lugar: Lugar, ruta: str, contenido: str) -> str:

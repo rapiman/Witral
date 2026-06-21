@@ -101,17 +101,20 @@ Reiniciá Claude Desktop. Las tools quedan disponibles.
 
 ## Estado
 
-Suite completa: **36 tools**.
-- Archivos: leer, leer_rango, buscar_en_archivo, escribir, anexar, editar_literal,
-  editar_linea, listar, crear_carpeta, mover.
+Suite de tools por familia (todas con el eje `donde` donde aplica):
+
+- Archivos: leer (rango opcional), escribir, anexar, convertir_eol, editar_literal,
+  editar_linea (ancla opcional), listar, crear_carpeta, mover, borrar, vaciar_papelera.
+- Sintaxis: verificar_sintaxis (universal + nativa; incluye json/yaml/toml).
 - Mover entre lugares: copiar.
-- SSH: ssh_run.
 - Base: psql, psql_aplicar.
-- Git: status, log, diff, branch, show, pull, add, commit, push, reset_hard.
+- Git: init, status, log, diff, branch, show, pull, fetch, add, commit, push,
+  reset_hard, remote (lista/agrega), identidad.
+- Sistema: run, procesos, matar_proceso, servicio.
 - Red: ping, http_request, tcp_socket.
-- ADB: devices, shell, install, forcestop, relanzar.
-- Gradle: gradle_task.
-- Búsqueda: buscar_nombre, buscar_contenido.
+- ADB: devices, shell, install, forcestop, relanzar, logcat.
+- Gradle: gradle_build.
+- Búsqueda: buscar_nombre, buscar_contenido (archivo o carpeta).
 
 Todas con el eje `donde` donde aplica, y la política de seguridad (destino
 desconocido, confirmación de destructivo, prod reforzado).

@@ -122,10 +122,15 @@ def verificar_sintaxis(archivo: str, donde: str = "local") -> str:
     css, sh, rb, pl. No reemplaza al compilador: es una red rápida antes de
     mover o compilar.
     """
-    import os
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
+    return _verificar_sintaxis_texto(lg, archivo)
+
+
+def _verificar_sintaxis_texto(lg, archivo: str) -> str:
+    """Cuerpo de verificar_sintaxis con el lugar ya resuelto (reusable)."""
+    import os
     ext = os.path.splitext(archivo)[1].lower()
     lang = SX.EXTENSIONES.get(ext)
     if not lang:
@@ -251,7 +256,8 @@ def editar_literal(archivo: str, viejo: str, nuevo: str, donde: str = "local") -
 
 @mcp.tool()
 def editar_linea(archivo: str, desde: int, hasta: int, nuevo: str,
-                 ancla: str = "", donde: str = "local") -> str:
+                 ancla: str = "", verificar: bool = False,
+                 donde: str = "local") -> str:
     """
     Reemplaza el rango de líneas [desde, hasta] por 'nuevo'. Inmune a CRLF/
     whitespace. Backup automático y devuelve el fragmento resultante para
@@ -262,19 +268,25 @@ def editar_linea(archivo: str, desde: int, hasta: int, nuevo: str,
     (comparación inmune a CRLF/espacios); si no coincide, aborta sin tocar el
     archivo y muestra esperado vs encontrado. Es la red de seguridad contra
     perder la cuenta de líneas. Sin 'ancla', edita el rango directo confiando
-    en los números. Usá leer_rango antes para ubicar las líneas, y pasá 'ancla'
-    siempre que puedas.
+    en los números. Usá leer con rango antes para ubicar las líneas.
+
+    PARÁMETRO 'verificar': si True, tras editar corre verificar_sintaxis sobre
+    el archivo y agrega el resultado (ahorra una llamada aparte al editar código).
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
         if ancla:
-            return A.editar(lg, archivo,
-                            ancladas=[A.EdicionAnclada(desde, hasta, ancla, nuevo)])
-        return A.editar(lg, archivo, lineas=[A.EdicionLinea(desde, hasta, nuevo)])
+            res = A.editar(lg, archivo,
+                           ancladas=[A.EdicionAnclada(desde, hasta, ancla, nuevo)])
+        else:
+            res = A.editar(lg, archivo, lineas=[A.EdicionLinea(desde, hasta, nuevo)])
     except (RutaFueraDeRaiz, FileNotFoundError, A.EdicionError) as e:
         return f"error: {e}"
+    if verificar:
+        res += "\n\n=== verificar_sintaxis ===\n" + _verificar_sintaxis_texto(lg, archivo)
+    return res
 
 
 @mcp.tool()
@@ -612,6 +624,36 @@ def git_push(repo: str, donde: str = "local", forzar: bool = False,
             f"Confirmá con el usuario y reintentá con confirmado=True."
         )
     return _fmt(G.push(lg, repo, forzar))
+
+
+@mcp.tool()
+def git_publicar(repo: str, mensaje: str, donde: str = "local", rutas: str = "",
+                 empujar: bool = True, forzar: bool = False,
+                 confirmado: bool = False) -> str:
+    """
+    Ciclo de commit completo EN UNA PASADA: status -> add -> diff (staged) ->
+    commit -> push. Ahorra encadenar las 5 tools a mano. Muestra el diff --stat
+    antes del commit (no se pierde el punto de control) y para si un paso falla.
+    'mensaje': el del commit. 'rutas': qué agregar separado por espacios (por
+    defecto todo). 'empujar': si False, solo commitea local (no push, no pide
+    confirmado). 'forzar': push con --force-with-lease.
+    Como publica al remoto, con empujar=True requiere confirmado=True.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    if empujar and not confirmado:
+        modo = " (FORZADO: reescribe la rama remota)" if forzar else ""
+        return (
+            f"CONFIRMACIÓN REQUERIDA: git_publicar hará commit y push desde "
+            f"'{donde}'{modo}.\nConfirmá con el usuario y reintentá con "
+            f"confirmado=True. (O usá empujar=False para commitear solo local.)"
+        )
+    lista = rutas.split() if rutas else None
+    try:
+        return G.publicar(lg, repo, mensaje, lista, empujar, forzar)
+    except RutaFueraDeRaiz as e:
+        return f"error: {e}"
 
 
 @mcp.tool()

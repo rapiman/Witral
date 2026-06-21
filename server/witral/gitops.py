@@ -76,6 +76,59 @@ def add(lugar: Lugar, repo: str, rutas: list[str]) -> T.Resultado:
     return _git(lugar, repo, ["add", *rutas])
 
 
+def publicar(lugar: Lugar, repo: str, mensaje: str, rutas: list[str] | None = None,
+             empujar: bool = True, forzar: bool = False) -> str:
+    """
+    Ciclo de commit completo en una pasada: status -> add -> diff (staged) ->
+    commit -> push. Para y reporta si un paso falla. Muestra el diff (--stat)
+    para no perder el punto de control antes del commit. Devuelve un resumen
+    legible de cada paso.
+    'rutas': qué agregar (por defecto todo, "."). 'empujar': si False, solo
+    commitea local (no hace push). 'forzar': push con --force-with-lease.
+    """
+    rutas = rutas or ["."]
+    partes = []
+
+    # 1. Estado previo.
+    st = status(lugar, repo)
+    if not st.ok:
+        return f"[status] error: {st.error or st.salida}"
+    cuerpo_st = (st.salida or "").strip()
+    # Si solo está la línea de rama (## ...) sin archivos, no hay nada que commitear.
+    lineas_cambio = [l for l in cuerpo_st.splitlines() if not l.startswith("##")]
+    if not lineas_cambio:
+        return f"Nada para commitear en {repo} ({lugar.nombre}). Estado:\n{cuerpo_st}"
+    partes.append(f"[1/5 status]\n{cuerpo_st}")
+
+    # 2. Add.
+    a = add(lugar, repo, rutas)
+    if not a.ok:
+        return "\n\n".join(partes) + f"\n\n[2/5 add] error: {a.error or a.salida}"
+    partes.append(f"[2/5 add] OK ({' '.join(rutas)})")
+
+    # 3. Diff staged (--stat): el punto de control, qué se va a commitear.
+    d = diff(lugar, repo, ["--cached", "--stat"])
+    partes.append(f"[3/5 diff staged]\n{(d.salida or '(sin cambios)').strip()}")
+
+    # 4. Commit.
+    c = commit(lugar, repo, mensaje)
+    if not c.ok:
+        return "\n\n".join(partes) + f"\n\n[4/5 commit] error: {c.error or c.salida}"
+    partes.append(f"[4/5 commit]\n{(c.salida or '').strip()}")
+
+    # 5. Push (opcional).
+    if not empujar:
+        partes.append("[5/5 push] omitido (empujar=False): commit solo local.")
+        return "\n\n".join(partes)
+    p = push(lugar, repo, forzar)
+    if not p.ok:
+        return ("\n\n".join(partes) +
+                f"\n\n[5/5 push] error: {p.error or p.salida}\n"
+                f"(El commit quedó local; revisá el error de push.)")
+    partes.append(f"[5/5 push]\n{(p.salida or p.error or 'OK').strip()}")
+    return "\n\n".join(partes)
+
+
 # --- Destructivo ------------------------------------------------------------
 
 def reset_hard(lugar: Lugar, repo: str, ref: str = "HEAD") -> T.Resultado:

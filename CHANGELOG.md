@@ -9,6 +9,15 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Añadido
 
+- `git_publicar(repo, mensaje, donde, rutas, empujar, forzar, confirmado)`: ciclo de
+  commit completo en una pasada (status -> add -> diff --stat -> commit -> push),
+  mostrando el diff antes del commit y parando si un paso falla. Ahorra encadenar las
+  cinco tools a mano. Con `empujar=False` commitea solo local. Requiere `confirmado=True`
+  cuando empuja.
+- `editar_linea`: parámetro `verificar` — si es True, tras editar corre verificar_sintaxis
+  sobre el archivo y agrega el resultado en la misma respuesta (ahorra una llamada al
+  editar código).
+
 - `convertir_eol(archivo, a, donde)`: convierte el fin de línea de un archivo entero a
   LF o CRLF. Para pasar archivos clonados en Windows a LF, o limpiar saltos mezclados.
 - `adb_logcat(serial, tags, nivel, lineas, limpiar_antes, donde)`: captura logcat del

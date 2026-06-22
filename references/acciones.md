@@ -80,7 +80,12 @@ confiando en los números. Pasá `ancla` siempre que puedas. Con `verificar=True
 - Validación en dos fases: valida todo primero; si algo falla, no escribe nada y reporta.
 - Backup automático antes de tocar cada archivo.
 - Preserva el fin de línea original (CRLF se mantiene; usar `convertir_eol` para cambiarlo).
-- Varias ediciones por línea en el mismo archivo: aplicar de mayor a menor número de línea.
+- **Editar de abajo hacia arriba.** Al hacer varias ediciones por número de línea en el
+  mismo archivo, ir de mayor a menor número: así cada edición no desfasa las líneas de las
+  siguientes (que están más arriba y no se mueven). Editar de arriba hacia abajo obliga a
+  recalcular posiciones tras cada cambio.
+- El `ancla` de `editar_linea` puede ser **solo las primeras líneas del rango** (no hace
+  falta copiar todo el rango): verifica que el inicio coincide, que ya protege del desfase.
 - `editar_linea` **devuelve el fragmento resultante** (las líneas editadas ± 2 de
   contexto), para verificar en el acto sin un `leer` con rango aparte.
 

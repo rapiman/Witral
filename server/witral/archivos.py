@@ -157,14 +157,23 @@ def _aplicar_ancladas(texto: str, ediciones: list[EdicionAnclada], eol: str) -> 
             raise EdicionError(
                 f"Rango inválido {ed.desde}-{ed.hasta} (archivo tiene {total} líneas)."
             )
-        actual = _norm_ancla(eol.join(lineas[ed.desde - 1: ed.hasta]))
         esperado = _norm_ancla(ed.ancla)
+        actual_full = _norm_ancla(eol.join(lineas[ed.desde - 1: ed.hasta]))
+        # Ancla PARCIAL: si el ancla tiene menos líneas que el rango, basta con
+        # que coincida el comienzo del rango (las primeras N líneas). Verificar
+        # que la primera línea del rango es la esperada ya protege del desfase,
+        # sin obligar a copiar todo el rango como ancla.
+        if 0 < len(esperado) < len(actual_full):
+            actual = actual_full[:len(esperado)]
+        else:
+            actual = actual_full
         if actual != esperado:
             raise EdicionError(
-                f"El contenido en {ed.desde}-{ed.hasta} no coincide con el ancla "
-                f"esperada (no se editó nada).\n"
-                f"--- esperado ---\n" + "\n".join(esperado) +
-                f"\n--- actual ---\n" + "\n".join(actual)
+                f"El ancla no coincide con el inicio del rango {ed.desde}-{ed.hasta} "
+                f"(no se editó nada). El ancla puede ser solo las primeras líneas "
+                f"del rango, pero deben coincidir EN ORDEN desde la línea {ed.desde}.\n"
+                f"--- esperado (ancla) ---\n" + "\n".join(esperado) +
+                f"\n--- actual (inicio del rango) ---\n" + "\n".join(actual)
             )
     # Reusar la mecánica de líneas: convertir a EdicionLinea ya validadas.
     return _aplicar_lineas(

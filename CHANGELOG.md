@@ -9,6 +9,16 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Añadido
 
+- `editar_literal`: parámetro `verificar` (igual que `editar_linea`), corre
+  verificar_sintaxis tras editar y agrega el resultado en la misma respuesta.
+
+### Cambiado
+
+- `editar_linea` con `ancla`: el ancla ahora puede ser **solo las primeras líneas del
+  rango**, no hace falta copiar todo el rango. Verifica que el inicio coincide (que ya
+  protege del desfase) y el mensaje de error es más claro sobre qué se esperaba. Resuelve
+  la fricción de tener que pasar el ancla completa.
+
 - `git_publicar(repo, mensaje, donde, rutas, empujar, forzar, confirmado)`: ciclo de
   commit completo en una pasada (status -> add -> diff --stat -> commit -> push),
   mostrando el diff antes del commit y parando si un paso falla. Ahorra encadenar las

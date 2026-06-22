@@ -240,18 +240,24 @@ def convertir_eol(archivo: str, a: str, donde: str = "local") -> str:
 
 
 @mcp.tool()
-def editar_literal(archivo: str, viejo: str, nuevo: str, donde: str = "local") -> str:
+def editar_literal(archivo: str, viejo: str, nuevo: str, verificar: bool = False,
+                   donde: str = "local") -> str:
     """
     Reemplaza una ocurrencia EXACTA y única de 'viejo' por 'nuevo'. Falla si no
     aparece o aparece más de una vez. Backup automático, CRLF preservado.
+    Con 'verificar'=True corre verificar_sintaxis tras editar y agrega el
+    resultado en la misma respuesta (al editar código, ahorra una llamada).
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
-        return A.editar(lg, archivo, literales=[A.EdicionLiteral(viejo, nuevo)])
+        res = A.editar(lg, archivo, literales=[A.EdicionLiteral(viejo, nuevo)])
     except (RutaFueraDeRaiz, FileNotFoundError, A.EdicionError) as e:
         return f"error: {e}"
+    if verificar:
+        res += "\n\n=== verificar_sintaxis ===\n" + _verificar_sintaxis_texto(lg, archivo)
+    return res
 
 
 @mcp.tool()

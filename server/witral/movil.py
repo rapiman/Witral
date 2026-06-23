@@ -364,22 +364,26 @@ def datastore_set(lugar: Lugar, serial: str, paquete: str, archivo: str,
     nuevo_b64 = base64.b64encode(bytes(nuevo)).decode()
 
     ruta = _ds_ruta(paquete, archivo)
+    # Los comandos con redirect/pipe se pasan como UN solo string remoto dentro de
+    # `adb shell` (mismo patron que adb_shell, que funciona): el `run-as ... sh -c
+    # '...'` viaja entero al device y el `cat > ruta_relativa` resuelve en el home
+    # del paquete. Si se trocea en tokens de lista, adb los reensambla y el `>` se
+    # evalua en el contexto equivocado (run-as pierde el cwd). Comillas simples
+    # protegen el comando remoto.
+    def _adb_sh(remoto: str) -> "T.Resultado":
+        return T.ejecutar(lugar, ["adb", "-s", serial, "shell", remoto])
+
     # 1) Backup del original en /sdcard.
     bak = f"/sdcard/{archivo.replace('/', '_')}.{serial}.bak.pb"
-    T.ejecutar(lugar, ["adb", "-s", serial, "shell",
-                       "run-as", paquete, "sh", "-c",
-                       f"cat {ruta} > {bak}"])
+    _adb_sh(f"run-as {paquete} sh -c 'cat {ruta} > {bak}'")
     # 2) Detener la app para que no sobrescriba el cambio desde su cache.
     T.ejecutar(lugar, ["adb", "-s", serial, "shell", "am", "force-stop", paquete])
     # 3) Escribir el nuevo .pb: base64 -> /sdcard -> run-as cat al datastore.
     tmp = f"/sdcard/{archivo.replace('/', '_')}.{serial}.new.pb"
-    w = T.ejecutar(lugar, ["adb", "-s", serial, "shell",
-                           "sh", "-c", f"echo {nuevo_b64} | base64 -d > {tmp}"])
+    w = _adb_sh(f"sh -c 'echo {nuevo_b64} | base64 -d > {tmp}'")
     if not w.ok:
         return f"error: no pude escribir el archivo temporal en el device: {w.error.strip()}"
-    cp = T.ejecutar(lugar, ["adb", "-s", serial, "shell",
-                            "run-as", paquete, "sh", "-c",
-                            f"cat {tmp} > {ruta}"])
+    cp = _adb_sh(f"run-as {paquete} sh -c 'cat {tmp} > {ruta}'")
     if not cp.ok:
         return f"error: no pude copiar al datastore via run-as: {cp.error.strip()}"
 

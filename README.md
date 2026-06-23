@@ -94,7 +94,7 @@ Dos modos de edición: `editar_literal` (texto exacto y único, inmune a CRLF) y
 `ping` · `http_request` · `tcp_socket`
 
 **Android / ADB**
-`adb_devices` · `adb_shell` · `adb_install` · `adb_forcestop` · `adb_relanzar` · `adb_logcat` (dump filtrado por tag)
+`adb_devices` · `adb_shell` · `adb_install` · `adb_forcestop` · `adb_relanzar` · `adb_logcat` (dump filtrado por tag) · `datastore_get` (lee prefs DataStore) · `datastore_set` (cambia una pref, ej. operativa REST/RETAIL; backup + force-stop, requiere confirmado)
 
 **Build**
 `gradle_build` — compila con el `gradlew` del proyecto. En unix/remoto compila y devuelve la salida. En local Windows el build no puede correr dentro del sandbox del cliente MCP (Gradle necesita sockets loopback): devuelve un aviso para compilar en una terminal propia y luego desplegar el APK con `adb_install`.

@@ -34,6 +34,17 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
   dispositivo en modo dump (vuelca y sale, no streaming), con filtro por tag y nivel,
   tail de líneas y opción de limpiar el buffer antes. Cierra el ciclo de logs del POS
   sin copiar/pegar a mano.
+- `datastore_get(serial, paquete, archivo, donde)`: lista las claves de un Jetpack
+  DataStore (Preferences) de una app Android, con su tipo y valor decodificado. Solo
+  lectura, vía run-as (app debuggable). Útil para inspeccionar parámetros del POS.
+- `datastore_set(serial, paquete, archivo, clave, valor, tipo, donde, confirmado)`:
+  cambia el valor de UNA clave en un Jetpack DataStore (Preferences) dejando el resto
+  intacto, decodificando/recodificando el protobuf correctamente (respeta los length
+  prefixes). `tipo="auto"` detecta y respeta el tipo actual de la clave. Pensado para
+  alternar parámetros en QA sin UI (ej. operativa REST/RETAIL). Hace backup en /sdcard
+  y `force-stop` antes de escribir (DataStore cachea en memoria); requiere
+  `confirmado=True` y relanzar la app después. Nueva sección "Android DataStore" en
+  `movil.py`.
 - `verificar_sintaxis`: agrega perfiles JSON/YAML/TOML con validación nativa por librería
   Python (json/pyyaml/tomllib), que da línea y columna del error y funciona local y remoto.
 

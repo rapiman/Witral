@@ -11,7 +11,7 @@ es una acción que acepta `donde` (lugar). La política de seguridad vive aquí:
 - Lugares sensibles (prod) => confirmación reforzada para psql y copiar-hacia.
 
 Cubre el flujo de migraciones (archivos, ssh, copiar, psql) más git, red, adb,
-gradle y búsqueda. 36 tools.
+gradle y búsqueda. 38 tools.
 """
 
 from __future__ import annotations
@@ -816,6 +816,57 @@ def adb_logcat(serial: str, tags: str = "", nivel: str = "V", lineas: int = 200,
     if aviso:
         return aviso
     return _fmt(M.adb_logcat(lg, serial, tags, nivel, lineas, limpiar_antes))
+
+
+@mcp.tool()
+def datastore_get(serial: str, paquete: str, archivo: str,
+                  donde: str = "local") -> str:
+    """
+    Lista las claves de un Jetpack DataStore (Preferences) de una app Android,
+    con su tipo y valor decodificado. 'archivo' es el nombre del .preferences_pb
+    en files/datastore/ del paquete (con o sin extensión, ej. "indicators_data").
+    Solo lectura. Requiere que la app sea debuggable (usa run-as); en release no
+    hay acceso. Útil para inspeccionar parámetros del POS en QA.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return M.datastore_get(lg, serial, paquete, archivo)
+
+
+@mcp.tool()
+def datastore_set(serial: str, paquete: str, archivo: str, clave: str,
+                  valor: str, tipo: str = "auto", donde: str = "local",
+                  confirmado: bool = False) -> str:
+    """
+    Cambia el valor de UNA clave en un Jetpack DataStore (Preferences) de una app
+    Android, dejando el resto del archivo intacto. Pensado para alternar
+    parámetros en QA (ej. operativa REST/RETAIL) sin tener UI para ello.
+
+    'archivo': nombre del .preferences_pb (ej. "indicators_data"). 'clave': la
+    preferencia (ej. "operativa"). 'valor': el nuevo valor en texto. 'tipo':
+    "auto" (por defecto) detecta y respeta el tipo actual de la clave; si no
+    existe, hay que indicar tipo explícito (string/int/long/bool/float/double).
+
+    DESTRUCTIVO (modifica datos persistentes de la app) => requiere
+    confirmado=True. Antes de escribir hace backup en /sdcard y detiene la app
+    (force-stop), porque DataStore cachea en memoria y podría sobrescribir el
+    cambio. Tras escribir hay que relanzar la app (adb_relanzar) para que cargue.
+    Requiere app debuggable (run-as); en release no funciona.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    if not confirmado:
+        return (
+            f"CONFIRMACIÓN REQUERIDA: vas a cambiar '{clave}' = '{valor}' "
+            f"(tipo {tipo}) en el datastore '{archivo}' del paquete '{paquete}' "
+            f"en '{donde}'.\n"
+            f"Modifica datos persistentes de la app. Se hace backup en /sdcard y "
+            f"se detiene la app antes de escribir; después hay que relanzarla.\n"
+            f"Confirmá con el usuario y reintentá con confirmado=True."
+        )
+    return M.datastore_set(lg, serial, paquete, archivo, clave, valor, tipo)
 
 
 # --- Gradle -----------------------------------------------------------------

@@ -190,8 +190,24 @@ Acotadas por parámetros (no línea libre):
 - `adb_devices(donde)` — listar dispositivos.
 - `adb_shell(serial, comando, donde)` — comando shell sobre un dispositivo; el servidor
   valida que se invoca `adb` y nada más.
-- Operaciones frecuentes (force-stop, relanzar, instalar) pueden tener su firma propia
-  según se necesiten.
+- `adb_install(serial, apk, donde)` — instala un APK (acepta ruta relativa o absoluta).
+- `adb_forcestop(serial, paquete, donde)` — force-stop de un paquete.
+- `adb_relanzar(serial, paquete, donde)` — relanza la app (LAUNCHER) en el dispositivo.
+- `adb_logcat(serial, tags, nivel, lineas, limpiar_antes, donde)` — captura logcat en
+  modo dump (vuelca y sale, no streaming), con filtro por tag/nivel, tail y opción de
+  limpiar el buffer antes (flujo: limpiar → reproducir en el POS → capturar).
+
+DataStore (Jetpack Preferences) de una app del dispositivo, vía `run-as` (requiere app
+debuggable; en release no hay acceso). Las prefs viven en `files/datastore/<nombre>.preferences_pb`,
+en formato protobuf; estas tools lo decodifican/recodifican respetando los length prefixes:
+- `datastore_get(serial, paquete, archivo, donde)` — lista las claves con su tipo y valor.
+  Solo lectura. Para inspeccionar parámetros del POS (`archivo` con o sin `.preferences_pb`).
+- `datastore_set(serial, paquete, archivo, clave, valor, tipo, donde, confirmado)` — cambia
+  UNA clave dejando el resto intacto. `tipo="auto"` detecta y respeta el tipo actual de la
+  clave (string/int/long/bool/float/double). Pensado para alternar parámetros en QA sin UI
+  (ej. operativa REST/RETAIL). Hace backup en `/sdcard` y `force-stop` antes de escribir
+  (DataStore cachea en memoria); requiere `confirmado=True` y relanzar la app (`adb_relanzar`)
+  después para que cargue el cambio.
 
 ---
 

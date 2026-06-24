@@ -8,7 +8,9 @@ sistema vía SSH.
 
 from __future__ import annotations
 
+import os
 import re
+from fnmatch import fnmatch
 
 from .config import Lugar
 from .seguridad import normalizar
@@ -25,11 +27,14 @@ def buscar_nombre(lugar: Lugar, proyecto: str, patron: str) -> str:
         base = normalizar(lugar.raiz, proyecto)
         rx = re.compile(patron)
         out = []
-        for p in base.rglob("*"):
-            if any(parte in _EXCLUIR for parte in p.parts):
-                continue
-            if p.is_file() and rx.search(p.name):
-                out.append(str(p.relative_to(base)))
+        # os.walk con poda IN-PLACE de dirs excluidos: no se DESCIENDE en build/.gradle/.git/etc.
+        # (antes rglob recorria TODO el arbol y filtraba despues -> se colgaba en proyectos Android).
+        for raiz, dirs, archivos in os.walk(base):
+            dirs[:] = [d for d in dirs if d not in _EXCLUIR]
+            for nombre in archivos:
+                if rx.search(nombre):
+                    ruta = os.path.join(raiz, nombre)
+                    out.append(os.path.relpath(ruta, base))
         return "\n".join(sorted(out)) if out else "(sin coincidencias)"
     # remoto: find
     excl = " ".join(f"-not -path '*/{e}/*'" for e in _EXCLUIR)
@@ -64,12 +69,16 @@ def buscar_contenido(lugar: Lugar, objetivo: str, patron: str,
             # Objetivo es un archivo único: ignorar los globs 'incluir'.
             buscar_en(base, base.name)
         else:
-            for patron_glob in incluir:
-                for p in base.rglob(patron_glob):
-                    if any(parte in _EXCLUIR for parte in p.parts):
+            # os.walk con poda IN-PLACE de dirs excluidos (no se desciende en build/.gradle/etc.),
+            # filtrando cada archivo por los globs 'incluir' con fnmatch. Antes rglob por cada glob
+            # recorria las carpetas excluidas y filtraba despues -> lento/colgado en Android.
+            from pathlib import Path
+            for raiz, dirs, archivos in os.walk(base):
+                dirs[:] = [d for d in dirs if d not in _EXCLUIR]
+                for nombre in archivos:
+                    if not any(fnmatch(nombre, g) for g in incluir):
                         continue
-                    if not p.is_file():
-                        continue
+                    p = Path(raiz) / nombre
                     buscar_en(p, p.relative_to(base))
         return "\n".join(out) if out else "(sin coincidencias)"
     # remoto: si es archivo, grep directo; si es carpeta, grep -rn con --include.

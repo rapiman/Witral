@@ -570,7 +570,12 @@ def git_branch(repo: str, donde: str = "local") -> str:
 
 @mcp.tool()
 def git_show(repo: str, ref: str, donde: str = "local") -> str:
-    """Muestra un commit/objeto con estadísticas."""
+    """
+    Muestra un commit (con --stat) o el CONTENIDO de un archivo en una rama/commit.
+    Para ver la versión de un archivo en otra rama (útil en merges), pasá
+    'ref' como "rama:ruta" o "commit:ruta" (ej. "develop:app/src/Main.kt") y
+    devuelve ese archivo tal cual está en esa rama. Sin ':' muestra el commit.
+    """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
@@ -605,12 +610,17 @@ def git_add(repo: str, rutas: str, donde: str = "local") -> str:
 
 
 @mcp.tool()
-def git_commit(repo: str, mensaje: str, todos: bool = False, donde: str = "local") -> str:
-    """git commit -m. Con todos=True agrega -a."""
+def git_commit(repo: str, mensaje: str = "", todos: bool = False,
+               merge: bool = False, donde: str = "local") -> str:
+    """
+    git commit -m. Con todos=True agrega -a. Para sellar un MERGE en curso sin
+    escribir mensaje, usar merge=True (toma el mensaje automático de git con
+    --no-edit). Si se da mensaje, se usa ese.
+    """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
-    return _fmt(G.commit(lg, repo, mensaje, todos))
+    return _fmt(G.commit(lg, repo, mensaje, todos, merge))
 
 
 @mcp.tool()
@@ -684,6 +694,22 @@ def git_init(repo: str, rama: str = "main", donde: str = "local") -> str:
     if aviso:
         return aviso
     return _fmt(G.init(lg, repo, rama))
+
+
+@mcp.tool()
+def git_clone(url: str, destino: str, rama: str = "", donde: str = "local") -> str:
+    """
+    Clona el repositorio 'url' en 'destino'. El destino no debe existir todavía
+    (o estar vacío). En local, 'destino' se acota a la raíz autorizada (no se
+    puede clonar fuera de ella); en remoto se interpreta en ese lugar. 'rama'
+    opcional clona solo esa rama (--branch). Trae código de la red pero es de
+    solo descarga (no publica ni destruye), por eso no pide confirmación, igual
+    que git_pull/git_fetch. Timeout amplio porque puede tardar.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return _fmt(G.clone(lg, url, destino, rama))
 
 
 @mcp.tool()

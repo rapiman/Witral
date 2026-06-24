@@ -9,6 +9,11 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Añadido
 
+- `git_clone(url, destino, rama, donde)`: clona un repositorio en `destino`. El destino
+  no debe existir todavía y en local se acota a la raíz autorizada (no se puede clonar
+  fuera de ella); en remoto se interpreta en ese lugar. `rama` opcional clona solo esa
+  rama (`--branch`). No pide confirmación (es solo descarga, no publica ni destruye),
+  igual que `git_pull`/`git_fetch`. Timeout amplio (300s) por si el repo es grande.
 - `editar_literal`: parámetro `verificar` (igual que `editar_linea`), corre
   verificar_sintaxis tras editar y agrega el resultado en la misma respuesta.
 
@@ -18,6 +23,11 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
   rango**, no hace falta copiar todo el rango. Verifica que el inicio coincide (que ya
   protege del desfase) y el mensaje de error es más claro sobre qué se esperaba. Resuelve
   la fricción de tener que pasar el ancla completa.
+- `git_show`: si `ref` es `rama:ruta` o `commit:ruta` (contiene `:`), vuelca el CONTENIDO
+  de ese archivo en esa rama/commit en vez de `--stat`. Permite comparar la versión de un
+  archivo entre ramas en un merge sin ir a otro clon.
+- `git_commit`: parámetro `merge` — con `merge=True` y sin mensaje, sella un merge en curso
+  usando el mensaje automático de git (`--no-edit`).
 
 - `git_publicar(repo, mensaje, donde, rutas, empujar, forzar, confirmado)`: ciclo de
   commit completo en una pasada (status -> add -> diff --stat -> commit -> push),

@@ -39,6 +39,16 @@ def branch(lugar: Lugar, repo: str) -> T.Resultado:
 
 
 def show(lugar: Lugar, repo: str, ref: str) -> T.Resultado:
+    """
+    git show de un commit o de un BLOB (archivo en una rama/commit).
+    - ref tipo "rama:ruta" o "commit:ruta" (contiene ':') -> vuelca el CONTENIDO
+      de ese archivo en esa rama/commit (sin --stat). Útil para comparar la
+      versión de un archivo entre ramas en un merge.
+    - ref de commit (sin ':') -> muestra el commit con --stat (resumen).
+    """
+    if ":" in ref:
+        # Es un blob (rama:ruta): volcar el contenido del archivo, sin --stat.
+        return _git(lugar, repo, ["show", ref])
     return _git(lugar, repo, ["show", ref, "--stat"])
 
 
@@ -53,8 +63,20 @@ def fetch(lugar: Lugar, repo: str) -> T.Resultado:
     return _git(lugar, repo, ["fetch", "--all"])
 
 
-def commit(lugar: Lugar, repo: str, mensaje: str, todos: bool = False) -> T.Resultado:
-    args = ["commit", "-m", mensaje]
+def commit(lugar: Lugar, repo: str, mensaje: str = "", todos: bool = False,
+           merge: bool = False) -> T.Resultado:
+    """
+    git commit. Con 'mensaje' usa -m. Con 'merge'=True y SIN mensaje, sella un
+    merge en curso usando el mensaje automático que git ya preparó (--no-edit,
+    toma MERGE_MSG). Si se da mensaje, se usa ese aunque merge=True.
+    """
+    if merge and not mensaje:
+        args = ["commit", "--no-edit"]
+    elif mensaje:
+        args = ["commit", "-m", mensaje]
+    else:
+        return T.Resultado(1, "", "Falta 'mensaje' (o usar merge=True para sellar "
+                                  "un merge con el mensaje automático).")
     if todos:
         args.insert(1, "-a")
     return _git(lugar, repo, args)
@@ -146,6 +168,24 @@ def init(lugar: Lugar, repo: str, rama: str = "main") -> T.Resultado:
     rb = _git(lugar, repo, ["branch", "-M", rama])
     salida = (r.salida + "\n" + rb.salida).strip()
     return T.Resultado(0, salida, rb.error.strip())
+
+
+def clone(lugar: Lugar, url: str, destino: str, rama: str = "",
+          timeout: int = 300) -> T.Resultado:
+    """
+    Clona 'url' en 'destino'. A diferencia de las demás operaciones git, el
+    repo destino todavía no existe, así que no se usa `git -C`: se pasa el
+    destino como argumento de `git clone`. En local el destino se normaliza
+    contra la raíz autorizada (no se puede clonar fuera de ella); en remoto se
+    interpreta en el lugar remoto. 'rama' opcional clona solo esa rama (--branch).
+    Timeout amplio porque traer un repo puede tardar.
+    """
+    dst = str(normalizar(lugar.raiz, destino)) if lugar.es_local else destino
+    args = ["git", "clone"]
+    if rama:
+        args += ["--branch", rama]
+    args += [url, dst]
+    return T.ejecutar(lugar, args, timeout=timeout)
 
 
 def remote_add(lugar: Lugar, repo: str, nombre: str, url: str) -> T.Resultado:

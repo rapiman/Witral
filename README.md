@@ -88,7 +88,7 @@ Dos modos de edición: `editar_literal` (texto exacto y único, inmune a CRLF) y
 `psql` — consulta/sentencia sobre la base local de un lugar · `psql_aplicar` — aplica un `.sql` (migraciones).
 
 **Git**
-`git_init` · `git_status` · `git_log` · `git_diff` · `git_branch` · `git_show` · `git_pull` · `git_fetch` · `git_add` · `git_commit` · `git_push` · `git_reset_hard` · `git_remote` (lista o agrega) · `git_identidad`
+`git_clone` (clona un repo en un destino acotado a la raiz) · `git_init` · `git_status` · `git_log` · `git_diff` · `git_branch` · `git_show` · `git_pull` · `git_fetch` · `git_add` · `git_commit` · `git_push` · `git_reset_hard` · `git_remote` (lista o agrega) · `git_identidad`
 
 **Red**
 `ping` · `http_request` · `tcp_socket`

@@ -177,8 +177,12 @@ Pasa por la regla de borde (lugares = lista blanca; destino nuevo → confirmar;
 destino sacado de un archivo sin preguntar).
 
 - `ping(host, donde)` — `donde` permite pingear desde un server.
-- `http_request(url, metodo, ...)` — status, headers, body. Solo a hosts que indique el
-  usuario; nunca a URLs aparecidas dentro de archivos sin confirmar.
+- `http_request(url, metodo, cuerpo, headers_json, params_json, donde)` — status, headers,
+  body. Solo a hosts que indique el usuario; nunca a URLs aparecidas dentro de archivos sin
+  confirmar. `params_json`: query params como JSON, percent-encodeados por Witral en Python
+  (UTF-8) — la forma correcta de pasar no-ASCII (ü, ñ) en la URL, en vez de armarla a mano o
+  usar curl por `run`. `donde`: hace la petición DESDE ese lugar (curl remoto), para probar
+  servicios que solo escuchan en localhost del server.
 - `tcp_socket(host, puerto, enviar, ...)` — abrir conexión, enviar/recibir bytes (p. ej.
   pruebas ISO8583 / SocketSSL). Mismo control.
 

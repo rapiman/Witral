@@ -102,7 +102,12 @@ def _backup(lugar: Lugar, ruta: str, data: bytes) -> str:
         destino.write_bytes(data)
         return str(destino)
     else:
-        destino = f"{ruta}.{ts}.bak"
+        # A ~/.witral/bak del lugar (relativo al home remoto, igual que la
+        # papelera): NUNCA al lado del archivo, para no ensuciar árboles git.
+        bakdir = ".witral/bak"
+        nombre = ruta.rstrip("/").split("/")[-1]
+        destino = f"{bakdir}/{nombre}.{ts}.bak"
+        T.ejecutar(lugar, ["mkdir", "-p", bakdir])
         T.escribir_remoto(lugar, destino, data)
         return destino
 

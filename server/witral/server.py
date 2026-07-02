@@ -765,14 +765,29 @@ def ping(host: str, cuenta: int = 4, donde: str = "local") -> str:
 
 @mcp.tool()
 def http_request(url: str, metodo: str = "GET", cuerpo: str = "",
-                 headers_json: str = "") -> str:
+                 headers_json: str = "", params_json: str = "",
+                 donde: str = "local") -> str:
     """
-    Petición HTTP/HTTPS desde local. Solo a hosts que indique el usuario; nunca
-    a URLs sacadas de archivos sin confirmar. headers_json: JSON opcional.
+    Petición HTTP/HTTPS desde un lugar. Solo a hosts que indique el usuario;
+    nunca a URLs sacadas de archivos sin confirmar.
+
+    params_json: query params como JSON (ej. '{"tema": "üllku"}'). Witral los
+    percent-encodea en Python, así el texto no-ASCII llega intacto SIN pelear
+    con el shell. Para pasar no-ASCII en la URL, usar SIEMPRE esto (no armar
+    la URL a mano ni usar curl por run).
+
+    donde: lugar desde el que sale la petición. En remoto usa curl del lugar;
+    sirve para probar servicios que solo escuchan en localhost del server.
+    headers_json: headers como JSON opcional.
     """
     import json
     hdrs = json.loads(headers_json) if headers_json else None
-    return R.http_request(url, metodo, cuerpo or None, hdrs)
+    prms = json.loads(params_json) if params_json else None
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return R.http_request(url, metodo, cuerpo or None, hdrs,
+                          params=prms, lugar=lg)
 
 
 @mcp.tool()

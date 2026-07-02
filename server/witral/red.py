@@ -29,11 +29,30 @@ def ping(lugar: Lugar, host: str, cuenta: int = 4) -> T.Resultado:
 
 
 def http_request(url: str, metodo: str = "GET", cuerpo: str | None = None,
-                 headers: dict | None = None, timeout: int = 30) -> str:
+                 headers: dict | None = None, timeout: int = 30,
+                 params: dict | None = None,
+                 lugar: Lugar | None = None) -> str:
     """
-    Petición HTTP/HTTPS desde local. Devuelve status, headers y body (truncado).
-    Usa urllib de la stdlib para no agregar dependencias.
+    Petición HTTP/HTTPS desde un lugar. Devuelve status, headers y body
+    (truncado). En local usa urllib (stdlib); en remoto arma y ejecuta curl.
+
+    'params': query params como dict. Se codifican en Python (urlencode,
+    UTF-8 -> percent-encoding) ANTES de tocar cualquier shell, así los
+    no-ASCII (ü, ñ, etc.) llegan intactos sin importar locale ni codepage.
+    Es la forma correcta de pasar texto no-ASCII en la URL; no armarla a mano.
+
+    'lugar': si es remoto, la petición se hace DESDE ese lugar (curl), lo que
+    permite probar servicios que solo escuchan en localhost del server.
     """
+    import urllib.parse
+
+    if params:
+        sep = "&" if "?" in url else "?"
+        url = url + sep + urllib.parse.urlencode(params)
+
+    if lugar is not None and not lugar.es_local:
+        return _http_remoto(lugar, url, metodo, cuerpo, headers, timeout)
+
     import urllib.request
     import urllib.error
 
@@ -52,6 +71,33 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str | None = None,
         return f"HTTP {e.code} {e.reason}\n{body[:2000]}"
     except Exception as e:
         return f"error: {e}"
+
+
+def _http_remoto(lugar: Lugar, url: str, metodo: str, cuerpo: str | None,
+                 headers: dict | None, timeout: int) -> str:
+    """
+    Petición HTTP desde un lugar remoto, vía curl. La URL ya llega
+    percent-encodeada (ASCII puro) desde http_request, así que la línea de
+    comando es inmune a problemas de locale. El cuerpo viaja por stdin
+    (--data-binary @-) para no pasar por el quoting del shell.
+    """
+    args = ["curl", "-sS", "-i", "--max-time", str(timeout),
+            "-X", metodo.upper()]
+    for k, v in (headers or {}).items():
+        args += ["-H", f"{k}: {v}"]
+    if cuerpo is not None:
+        args += ["--data-binary", "@-"]
+    args.append(url)
+    r = T.ejecutar(lugar, args, entrada=cuerpo, timeout=timeout + 10)
+    if not r.ok and not r.salida:
+        return f"error (curl en {lugar.nombre}): {r.error.strip()}"
+    salida = r.salida
+    if len(salida) > 4000:
+        salida = salida[:4000] + "\n...[truncado]"
+    out = f"[desde {lugar.nombre}]\n{salida}"
+    if r.error.strip():
+        out += f"\n--- stderr ---\n{r.error.strip()}"
+    return out
 
 
 def tcp_socket(host: str, puerto: int, enviar: str | None = None,

@@ -9,6 +9,13 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Añadido
 
+- `http_request`: parámetros `params_json` y `donde`. `params_json` recibe los query
+  params como JSON y Witral los percent-encodea en Python (urlencode, UTF-8) antes de
+  armar la URL, así el texto no-ASCII (ü, ñ) llega intacto sin pelear con el locale del
+  shell — resuelve la fricción de la ü rota en `curl` vía `run`. `donde` permite hacer la
+  petición DESDE un lugar remoto (arma y ejecuta curl allí; el cuerpo viaja por stdin con
+  `--data-binary @-`), útil para servicios que solo escuchan en localhost del server.
+
 - `git_clone(url, destino, rama, donde)`: clona un repositorio en `destino`. El destino
   no debe existir todavía y en local se acota a la raíz autorizada (no se puede clonar
   fuera de ella); en remoto se interpreta en ese lugar. `rama` opcional clona solo esa
@@ -19,6 +26,9 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Cambiado
 
+- Backup remoto de edición: los `.bak` en lugares remotos ahora van a `~/.witral/bak/`
+  del lugar (igual que la papelera remota), NUNCA al lado del archivo editado. Antes
+  quedaban en el árbol de trabajo y ensuciaban el `git status` de repos remotos.
 - `editar_linea` con `ancla`: el ancla ahora puede ser **solo las primeras líneas del
   rango**, no hace falta copiar todo el rango. Verifica que el inicio coincide (que ya
   protege del desfase) y el mensaje de error es más claro sobre qué se esperaba. Resuelve

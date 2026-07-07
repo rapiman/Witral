@@ -33,6 +33,13 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Cambiado
 
+- `_ejecutar_local` pasa de `subprocess.run` a `Popen` con **matanza del árbol de
+  procesos** en el timeout (`taskkill /T /F` en Windows, `killpg` en unix con
+  `start_new_session`). Con `shell=True` el comando real es un nieto: matar solo al hijo
+  directo dejaba al nieto sujetando los pipes y el drenaje interno se colgaba para
+  siempre — la tool no devolvía ni el 124 y el MCP cortaba a los 4 minutos. Ahora el
+  timeout devuelve 124 al instante, con el árbol terminado. Un comando inejecutable
+  devuelve 127 con mensaje en vez de excepción.
 - `psql` ahora manda el SQL por **stdin** en vez de `-c`: con varias sentencias en una
   llamada se muestran TODOS los result sets, no solo el último. Resuelve el incidente de
   la consulta doble que ocultó un SELECT y llevó a duplicar tablas.

@@ -196,6 +196,28 @@ def _decodificar_salida(data: bytes) -> str:
     return data.decode("latin-1", "replace")
 
 
+def _matar_arbol(proc) -> None:
+    """
+    Mata el ÁRBOL de procesos de 'proc', no solo el hijo directo. Con
+    shell=True el hijo es cmd.exe/sh y el comando real es un NIETO:
+    proc.kill() deja al nieto vivo sujetando los pipes, y el drenaje
+    posterior se cuelga para siempre. taskkill /T /F en Windows;
+    killpg en unix (requiere start_new_session=True al lanzar).
+    """
+    try:
+        if _os.name == "nt":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=15)
+        else:
+            import signal
+            _os.killpg(proc.pid, signal.SIGKILL)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
+
 def _ejecutar_local(argv, *, cwd, entrada, timeout, env_extra=None) -> Resultado:
     usar_shell = isinstance(argv, str)
     import os as _os
@@ -218,29 +240,52 @@ def _ejecutar_local(argv, *, cwd, entrada, timeout, env_extra=None) -> Resultado
             env[var] = tmp_ok
         else:
             env[var] = valor.strip()
-    kwargs = dict(
+    popen_kwargs = dict(
         shell=usar_shell,
         cwd=cwd,
-        capture_output=True,
-        timeout=timeout,
         env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
+    if _os.name != "nt":
+        # Grupo de procesos propio: permite matar el árbol completo (killpg).
+        popen_kwargs["start_new_session"] = True
     # Modo bytes (sin text=True): la decodificación la hace _decodificar_salida
     # (UTF-8 primero) para evitar el mojibake de la codepage ANSI de Windows.
-    if entrada is not None:
-        kwargs["input"] = entrada.encode("utf-8")
-    else:
-        # stdin como pipe vacío (EOF inmediato), NO DEVNULL: evita que git
-        # cuelgue esperando entrada, pero le da a la JVM/Gradle un handle de
-        # stdin válido para su selector NIO (DEVNULL rompe el loopback en Windows).
-        kwargs["input"] = b""
+    # stdin como pipe con EOF inmediato (b"" si no hay entrada), NO DEVNULL:
+    # evita que git cuelgue esperando entrada, pero le da a la JVM/Gradle un
+    # handle de stdin válido para su selector NIO (DEVNULL rompe el loopback
+    # en Windows).
+    datos = entrada.encode("utf-8") if entrada is not None else b""
     try:
-        proc = subprocess.run(argv, **kwargs)
-    except subprocess.TimeoutExpired as e:
-        return Resultado(124, _decodificar_salida(e.stdout or b""),
-                         f"timeout tras {timeout}s")
-    return Resultado(proc.returncode, _decodificar_salida(proc.stdout),
-                     _decodificar_salida(proc.stderr))
+        proc = subprocess.Popen(argv, **popen_kwargs)
+    except (OSError, ValueError) as e:
+        return Resultado(127, "", f"no se pudo lanzar el comando: {e}")
+    try:
+        out, err = proc.communicate(input=datos, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Con subprocess.run, tras el timeout se mataba SOLO al hijo directo y
+        # el drenaje de pipes quedaba colgado para siempre si un nieto seguía
+        # vivo (los cuelgues de 4 min que ni siquiera devolvían 124). Ahora se
+        # mata el árbol entero y el drenaje termina.
+        _matar_arbol(proc)
+        try:
+            out, err = proc.communicate(timeout=5)
+        except Exception:
+            out, err = b"", b""
+            for canal in (proc.stdout, proc.stderr, proc.stdin):
+                try:
+                    if canal:
+                        canal.close()
+                except Exception:
+                    pass
+        detalle = _decodificar_salida(err or b"").strip()
+        msj = f"timeout tras {timeout}s (árbol de procesos terminado)"
+        return Resultado(124, _decodificar_salida(out or b""),
+                         f"{detalle}\n{msj}".strip() if detalle else msj)
+    return Resultado(proc.returncode, _decodificar_salida(out),
+                     _decodificar_salida(err))
 
 
 

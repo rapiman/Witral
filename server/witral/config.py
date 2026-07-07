@@ -265,9 +265,10 @@ def _formatear_error_json(ruta, texto: str, e: "json.JSONDecodeError") -> str:
 def cargar() -> Config:
     """Carga la config desde disco. Siempre garantiza un lugar 'local'.
 
-    NUNCA lanza por config inválida: si el JSON está roto o un lugar mal
-    formado, el servidor arranca igual con solo 'local' y el detalle del
-    error queda en Config.error_config para que las tools lo reporten.
+    NUNCA lanza por config inválida. Si el JSON está roto, arranca solo con
+    'local'; si el JSON parsea pero un lugar/identidad está mal formado, se
+    cargan igual los válidos (fail-soft por lugar). El detalle del error
+    queda en Config.error_config para que las tools lo reporten.
     """
     ruta = _ruta_config()
     lugares: dict[str, Lugar] = {}
@@ -276,23 +277,32 @@ def cargar() -> Config:
 
     if ruta.exists():
         texto = ruta.read_text(encoding="utf-8-sig")
+        data = None
         try:
             data = json.loads(texto)
-            for nombre, d in data.get("lugares", {}).items():
-                lugares[nombre] = _parse_lugar(nombre, d)
-            for nombre, d in data.get("identidades", {}).items():
-                identidades[nombre] = _parse_identidad(d)
         except json.JSONDecodeError as e:
+            # JSON roto: no se puede rescatar nada; solo queda 'local'.
             error_config = _formatear_error_json(ruta, texto, e)
-            lugares.clear()
-            identidades.clear()
-        except (KeyError, TypeError, ValueError) as e:
-            error_config = (
-                f"Config con estructura inválida en {ruta}: {e}\n"
-                f"Revisá que cada lugar/identidad tenga los campos correctos."
-            )
-            lugares.clear()
-            identidades.clear()
+        if data is not None:
+            # Fail-soft POR LUGAR: un lugar/identidad mal formado no tumba a
+            # los demás; se cargan los válidos y se reporta solo lo roto.
+            rotos: list[str] = []
+            for nombre, d in (data.get("lugares", {}) or {}).items():
+                try:
+                    lugares[nombre] = _parse_lugar(nombre, d)
+                except (KeyError, TypeError, ValueError) as e:
+                    rotos.append(f"lugar '{nombre}': {e}")
+            for nombre, d in (data.get("identidades", {}) or {}).items():
+                try:
+                    identidades[nombre] = _parse_identidad(d)
+                except (KeyError, TypeError, ValueError) as e:
+                    rotos.append(f"identidad '{nombre}': {e}")
+            if rotos:
+                error_config = (
+                    f"Config parcialmente inválida en {ruta}. Se cargaron los "
+                    f"lugares/identidades válidos; con errores:\n  - "
+                    + "\n  - ".join(rotos)
+                )
 
     # Garantizar 'local' (siempre, incluso si la config falló).
     if LOCAL not in lugares:

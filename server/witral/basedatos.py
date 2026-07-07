@@ -53,67 +53,74 @@ def _base_args(db: DBConfig) -> list[str]:
     return args
 
 
-def _entorno(db: DBConfig) -> dict:
-    """Entorno para psql: timeout de conexión corto siempre, y PGPASSWORD si hay."""
-    import os
-    env = dict(os.environ)
-    # PGCONNECT_TIMEOUT: si el host no responde, abortar en ~10s en vez de colgarse.
-    env.setdefault("PGCONNECT_TIMEOUT", "10")
-    if db.password:
-        env["PGPASSWORD"] = db.password
-    return env
+def _con_base(db: DBConfig, base: str | None) -> DBConfig:
+    """Copia de la config de base con la base override, si se pidió otra."""
+    if not base or base == db.base:
+        return db
+    import dataclasses
+    return dataclasses.replace(db, base=base)
 
 
-def psql_comando(lugar: Lugar, comando: str) -> T.Resultado:
+def psql_comando(lugar: Lugar, comando: str, base: str | None = None) -> T.Resultado:
     """
-    Ejecuta un comando/consulta vía `psql -c`. Para SQL ad-hoc y meta-comandos.
+    Ejecuta SQL/meta-comandos vía psql con el SQL por STDIN (no -c): con
+    varias sentencias en una llamada psql imprime TODOS los result sets,
+    no solo el último (el modo -c ocultaba los anteriores).
+    'base' permite apuntar a otra base del mismo lugar sin tocar config.
     """
-    db = lugar.requiere_db()
-    args = _base_args(db) + ["-c", comando]
-    return _correr(lugar, db, args)
+    db = _con_base(lugar.requiere_db(), base)
+    args = _base_args(db)
+    entrada = comando if comando.endswith("\n") else comando + "\n"
+    return _correr(lugar, db, args, entrada=entrada)
 
 
-def psql_archivo(lugar: Lugar, ruta_sql: str) -> T.Resultado:
+def psql_archivo(lugar: Lugar, ruta_sql: str, origen: Lugar | None = None,
+                 base: str | None = None) -> T.Resultado:
     """
-    Aplica un archivo .sql vía `psql -f`. La ruta es del lado del lugar
-    (el .sql ya llegó allí por git o copiar). Caso central de migraciones.
+    Aplica un archivo .sql: Witral LEE el archivo (con sus tools de archivo,
+    desde 'origen' — por defecto el mismo lugar de la base) y manda el
+    contenido por STDIN al psql del lugar de la BASE. Así se desacopla
+    "dónde está el .sql" de "dónde corre psql": sirve para bases detrás de
+    túnel (el psql no ve el filesystem local) y evita el boilerplate psycopg.
+    'base' permite apuntar a otra base del mismo lugar.
     """
-    db = lugar.requiere_db()
-    # En local, normalizar la ruta como las tools de archivo (relativa contra la
-    # raíz o absoluta, acotada a la raíz), para que psql no la interprete desde
-    # su propio directorio. En remoto la ruta es del lado del lugar, tal cual.
+    from . import archivos as A
+    db = _con_base(lugar.requiere_db(), base)
+    org = origen if origen is not None else lugar
+    contenido = A._leer_bytes(org, ruta_sql).decode("utf-8-sig", "replace")
+    if not contenido.strip():
+        return T.Resultado(1, "", f"el archivo {ruta_sql} está vacío")
+    if not contenido.endswith("\n"):
+        contenido += "\n"
+    args = _base_args(db)
+    return _correr(lugar, db, args, entrada=contenido)
+
+
+def _correr(lugar: Lugar, db: DBConfig, args: list[str],
+            entrada: str | None = None) -> T.Resultado:
+    # Entorno común: timeout de conexión corto (no colgarse si la base no
+    # responde) y salida en UTF-8 (evita mojibake al decodificar).
+    env_extra = {"PGCONNECT_TIMEOUT": "10", "PGCLIENTENCODING": "UTF8"}
     if lugar.es_local:
-        from .seguridad import normalizar
-        ruta_sql = str(normalizar(lugar.raiz, ruta_sql))
-    args = _base_args(db) + ["-f", ruta_sql]
-    return _correr(lugar, db, args)
-
-
-def _correr(lugar: Lugar, db: DBConfig, args: list[str]) -> T.Resultado:
-    if lugar.es_local:
-        # Entorno con PGCONNECT_TIMEOUT (y PGPASSWORD si hay). Con -w en los args,
-        # si la base pide password y no hay credencial, psql falla al instante.
-        env = _entorno(db)
-        import subprocess
-        try:
-            proc = subprocess.run(
-                args, capture_output=True, text=True, timeout=60, env=env,
-                input="",
-            )
-            return T.Resultado(proc.returncode, proc.stdout, proc.stderr)
-        except subprocess.TimeoutExpired as e:
-            return T.Resultado(124, e.stdout or "",
-                               "timeout (60s): la base no respondió a tiempo")
+        if db.password:
+            env_extra["PGPASSWORD"] = db.password
+        # Con -w en los args, si la base pide password y no hay credencial,
+        # psql falla al instante en vez de esperar un prompt.
+        return T.ejecutar(lugar, args, entrada=entrada, timeout=60,
+                          env_extra=env_extra)
     else:
         linea = " ".join(_q(a) for a in args)
+        prefijo = " ".join(f"{k}={_q(v)}" for k, v in env_extra.items())
         if db.como:
             # Peer auth: ejecutar como el usuario del sistema vía sudo. Sin
             # password TCP; psql usa el socket local con el rol de ese usuario.
-            linea = f"sudo -u {_q(db.como)} {linea}"
-        elif db.password:
-            # Prefijar PGPASSWORD en la línea si hay password.
-            linea = f"PGPASSWORD={_q(db.password)} {linea}"
-        return T.ejecutar(lugar, linea, timeout=60)
+            # 'env' para que las variables lleguen al proceso bajo sudo.
+            linea = f"sudo -u {_q(db.como)} env {prefijo} {linea}"
+        else:
+            if db.password:
+                prefijo = f"PGPASSWORD={_q(db.password)} {prefijo}"
+            linea = f"{prefijo} {linea}"
+        return T.ejecutar(lugar, linea, entrada=entrada, timeout=60)
 
 
 def _q(s: str) -> str:

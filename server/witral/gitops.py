@@ -98,17 +98,30 @@ def add(lugar: Lugar, repo: str, rutas: list[str]) -> T.Resultado:
     return _git(lugar, repo, ["add", *rutas])
 
 
+def untracked(lugar: Lugar, repo: str) -> list[str]:
+    """Lista de archivos sin trackear (los NUEVOS que un 'add .' agregaría)."""
+    r = _git(lugar, repo, ["status", "--porcelain"])
+    if not r.ok:
+        return []
+    return [l[3:].strip() for l in r.salida.splitlines() if l.startswith("?? ")]
+
+
 def publicar(lugar: Lugar, repo: str, mensaje: str, rutas: list[str] | None = None,
-             empujar: bool = True, forzar: bool = False) -> str:
+             empujar: bool = True, forzar: bool = False,
+             excluir: list[str] | None = None) -> str:
     """
     Ciclo de commit completo en una pasada: status -> add -> diff (staged) ->
     commit -> push. Para y reporta si un paso falla. Muestra el diff (--stat)
     para no perder el punto de control antes del commit. Devuelve un resumen
     legible de cada paso.
-    'rutas': qué agregar (por defecto todo, "."). 'empujar': si False, solo
-    commitea local (no hace push). 'forzar': push con --force-with-lease.
+    'rutas': qué agregar (por defecto todo, "."). 'excluir': pathspecs que NO
+    se agregan (se traducen a ':(exclude)ruta'; sirve para dejar afuera
+    archivos sueltos del working tree). 'empujar': si False, solo commitea
+    local (no hace push). 'forzar': push con --force-with-lease.
     """
     rutas = rutas or ["."]
+    if excluir:
+        rutas = rutas + [f":(exclude){e}" for e in excluir]
     partes = []
 
     # 1. Estado previo.
@@ -121,6 +134,13 @@ def publicar(lugar: Lugar, repo: str, mensaje: str, rutas: list[str] | None = No
     if not lineas_cambio:
         return f"Nada para commitear en {repo} ({lugar.nombre}). Estado:\n{cuerpo_st}"
     partes.append(f"[1/5 status]\n{cuerpo_st}")
+
+    # Aviso de polizones: archivos NUEVOS (untracked) que el add va a llevar.
+    # Solo aplica cuando se agrega todo ('.'), no con rutas explícitas.
+    nuevos = untracked(lugar, repo) if "." in rutas else []
+    if nuevos:
+        partes.append("[NUEVOS] untracked que entran al add: " + ", ".join(nuevos) +
+                      "\n(Si alguno no corresponde, usar 'excluir' o 'rutas'.)")
 
     # 2. Add.
     a = add(lugar, repo, rutas)

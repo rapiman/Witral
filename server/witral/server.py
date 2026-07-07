@@ -11,7 +11,7 @@ es una acción que acepta `donde` (lugar). La política de seguridad vive aquí:
 - Lugares sensibles (prod) => confirmación reforzada para psql y copiar-hacia.
 
 Cubre el flujo de migraciones (archivos, ssh, copiar, psql) más git, red, adb,
-gradle y búsqueda. 38 tools.
+gradle y búsqueda. (El número de tools cambia; verlo con tool_search, no aquí.)
 """
 
 from __future__ import annotations
@@ -67,11 +67,24 @@ def _resolver(donde: str | None):
         )
 
 
-def _fmt(r: T.Resultado) -> str:
+_MAX_SALIDA = 40000  # tope global de chars por bloque de salida
+
+
+def _truncar(texto: str, limite: int = _MAX_SALIDA) -> str:
+    """Trunca con aviso explícito (salidas gigantes atascan el transporte MCP)."""
+    if limite <= 0 or len(texto) <= limite:
+        return texto
+    return (texto[:limite] +
+            f"\n...[truncado: mostrando {limite} de {len(texto)} chars; "
+            f"acotar la salida del comando, o volcarla a un archivo y "
+            f"leerla por rangos]")
+
+
+def _fmt(r: T.Resultado, max_salida: int = _MAX_SALIDA) -> str:
     """Formatea un Resultado de comando para devolver al modelo."""
-    out = f"[código {r.codigo}]\n{r.salida}"
+    out = f"[código {r.codigo}]\n{_truncar(r.salida, max_salida)}"
     if r.error:
-        out += "\n--- stderr ---\n" + r.error
+        out += "\n--- stderr ---\n" + _truncar(r.error, max_salida)
     return out
 
 
@@ -404,12 +417,16 @@ def copiar(origen_ruta: str, destino_lugar: str, destino_ruta: str,
 # --- Ejecución de comandos (run) --------------------------------------------
 
 @mcp.tool()
-def run(comando: str, donde: str = "local", confirmado: bool = False) -> str:
+def run(comando: str, donde: str = "local", confirmado: bool = False,
+        max_salida: int = 40000) -> str:
     """
     Ejecuta un comando arbitrario en un lugar (local o remoto) y devuelve la
     salida. SIEMPRE requiere confirmado=True: es una escotilla de propósito
     general. Para operaciones comunes (archivos, git, procesos, servicios)
     preferí las tools tipadas con eje 'donde', que son más seguras y claras.
+    El directorio de trabajo es la RAÍZ del lugar (en local, Proyectos\\), así
+    que las rutas relativas se resuelven contra ella. 'max_salida' acota los
+    chars devueltos (trunca con aviso; salidas gigantes atascan el MCP).
     """
     lg, aviso = _resolver(donde)
     if aviso:
@@ -424,7 +441,9 @@ def run(comando: str, donde: str = "local", confirmado: bool = False) -> str:
             f"Para continuar igual, reintentá con confirmado=True."
         )
     try:
-        return _fmt(T.ejecutar(lg, comando))
+        # cwd = raíz del lugar (si está definida): rutas relativas predecibles.
+        return _fmt(T.ejecutar(lg, comando, cwd=lg.raiz or None),
+                    max_salida=max_salida)
     except T.TransporteError as e:
         return f"error: {e}"
 
@@ -480,11 +499,15 @@ def servicio(accion: str, nombre: str, donde: str = "local",
 # --- Base de datos (psql en un lugar) --------------------------------------
 
 @mcp.tool()
-def psql(donde: str, comando: str, confirmado: bool = False) -> str:
+def psql(donde: str, comando: str, confirmado: bool = False,
+         base: str = "") -> str:
     """
-    Corre psql en un lugar (la base es local allí). Lectura libre; sentencias
-    destructivas (UPDATE/DELETE/DROP/TRUNCATE/ALTER/INSERT/CREATE) requieren
+    Corre psql en un lugar (la base es local allí). El SQL viaja por stdin:
+    con VARIAS sentencias en una llamada se muestran TODOS los result sets
+    (ya no solo el último). Lectura libre; sentencias destructivas
+    (UPDATE/DELETE/DROP/TRUNCATE/ALTER/INSERT/CREATE) requieren
     confirmado=True. En lugares sensibles, cualquier ejecución pide confirmación.
+    'base': nombre de base alternativa del mismo lugar (override del -d).
     """
     lg, aviso = _resolver(donde)
     if aviso:
@@ -502,30 +525,47 @@ def psql(donde: str, comando: str, confirmado: bool = False) -> str:
             f"Mostrá esto al usuario y reintentá con confirmado=True."
         )
     try:
-        return _fmt(DB.psql_comando(lg, comando))
+        return _fmt(DB.psql_comando(lg, comando, base=base or None))
     except Exception as e:
         return f"error: {e}"
 
 
 @mcp.tool()
-def psql_aplicar(donde: str, ruta_sql: str, confirmado: bool = False) -> str:
+def psql_aplicar(donde: str, ruta_sql: str, confirmado: bool = False,
+                 origen: str = "", base: str = "") -> str:
     """
-    Aplica un archivo .sql con psql -f en un lugar (caso central de migración).
-    El .sql ya debe estar en el lugar (llegó por git o copiar). Siempre requiere
-    confirmado=True porque aplica cambios; reforzado en lugares sensibles.
+    Aplica un archivo .sql en la base de 'donde' (caso central de migración).
+    Witral LEE el .sql y lo manda por STDIN al psql del lugar de la BASE, así
+    que "dónde está el archivo" y "dónde corre psql" quedan desacoplados:
+    - 'origen': lugar donde vive el .sql (por defecto, el mismo 'donde').
+      Ej.: origen="local" aplica un .sql local contra una base detrás de
+      túnel cuyo psql no ve el filesystem local.
+    - 'base': base alternativa del mismo lugar (override del -d de config).
+    Siempre requiere confirmado=True porque aplica cambios; reforzado en
+    lugares sensibles.
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
+    org = None
+    if origen and origen != donde:
+        org, aviso = _resolver(origen)
+        if aviso:
+            return aviso
     if not confirmado:
         extra = " (LUGAR SENSIBLE — revisá el contenido del .sql primero)" if lg.sensible else ""
+        de = f" (archivo en '{origen}')" if origen and origen != donde else ""
+        en_base = f" base: {base}" if base else ""
         return (
             f"CONFIRMACIÓN REQUERIDA para aplicar migración{extra}.\n"
-            f"Archivo: {ruta_sql}\nLugar: {donde}\n"
+            f"Archivo: {ruta_sql}{de}\nLugar: {donde}{en_base}\n"
             f"Mostrá al usuario qué se va a aplicar y reintentá con confirmado=True."
         )
     try:
-        return _fmt(DB.psql_archivo(lg, ruta_sql))
+        return _fmt(DB.psql_archivo(lg, ruta_sql, origen=org,
+                                    base=base or None))
+    except (RutaFueraDeRaiz, FileNotFoundError, T.TransporteError) as e:
+        return f"error: {e}"
     except Exception as e:
         return f"error: {e}"
 
@@ -644,15 +684,19 @@ def git_push(repo: str, donde: str = "local", forzar: bool = False,
 
 @mcp.tool()
 def git_publicar(repo: str, mensaje: str, donde: str = "local", rutas: str = "",
-                 empujar: bool = True, forzar: bool = False,
+                 excluir: str = "", empujar: bool = True, forzar: bool = False,
                  confirmado: bool = False) -> str:
     """
     Ciclo de commit completo EN UNA PASADA: status -> add -> diff (staged) ->
     commit -> push. Ahorra encadenar las 5 tools a mano. Muestra el diff --stat
     antes del commit (no se pierde el punto de control) y para si un paso falla.
     'mensaje': el del commit. 'rutas': qué agregar separado por espacios (por
-    defecto todo). 'empujar': si False, solo commitea local (no push, no pide
-    confirmado). 'forzar': push con --force-with-lease.
+    defecto todo). 'excluir': rutas/patrones que NO se agregan (pathspec
+    ':(exclude)', separado por espacios) — para dejar afuera archivos sueltos
+    del working tree. Al agregar todo, los NUEVOS (untracked) se listan
+    explícitamente en la confirmación y en la salida. 'empujar': si False,
+    solo commitea local (no push, no pide confirmado). 'forzar': push con
+    --force-with-lease.
     Como publica al remoto, con empujar=True requiere confirmado=True.
     """
     lg, aviso = _resolver(donde)
@@ -660,14 +704,30 @@ def git_publicar(repo: str, mensaje: str, donde: str = "local", rutas: str = "",
         return aviso
     if empujar and not confirmado:
         modo = " (FORZADO: reescribe la rama remota)" if forzar else ""
+        # Polizones a la vista ANTES de aprobar: si se agrega todo, listar
+        # los untracked que el add se va a llevar.
+        nota_nuevos = ""
+        if not rutas:
+            try:
+                nuevos = G.untracked(lg, repo)
+                if nuevos:
+                    nota_nuevos = (
+                        "\nNUEVOS (untracked) que se agregarán: "
+                        + ", ".join(nuevos)
+                        + "\n(Para dejar alguno afuera, usar 'excluir' o 'rutas'.)"
+                    )
+            except Exception:
+                pass
         return (
             f"CONFIRMACIÓN REQUERIDA: git_publicar hará commit y push desde "
-            f"'{donde}'{modo}.\nConfirmá con el usuario y reintentá con "
-            f"confirmado=True. (O usá empujar=False para commitear solo local.)"
+            f"'{donde}'{modo}.{nota_nuevos}\nConfirmá con el usuario y reintentá "
+            f"con confirmado=True. (O usá empujar=False para commitear solo local.)"
         )
     lista = rutas.split() if rutas else None
+    lista_excluir = excluir.split() if excluir else None
     try:
-        return G.publicar(lg, repo, mensaje, lista, empujar, forzar)
+        return G.publicar(lg, repo, mensaje, lista, empujar, forzar,
+                          excluir=lista_excluir)
     except RutaFueraDeRaiz as e:
         return f"error: {e}"
 
@@ -766,7 +826,8 @@ def ping(host: str, cuenta: int = 4, donde: str = "local") -> str:
 @mcp.tool()
 def http_request(url: str, metodo: str = "GET", cuerpo: str = "",
                  headers_json: str = "", params_json: str = "",
-                 donde: str = "local") -> str:
+                 donde: str = "local", a_archivo: str = "",
+                 max_salida: int = 4000) -> str:
     """
     Petición HTTP/HTTPS desde un lugar. Solo a hosts que indique el usuario;
     nunca a URLs sacadas de archivos sin confirmar.
@@ -779,6 +840,13 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str = "",
     donde: lugar desde el que sale la petición. En remoto usa curl del lugar;
     sirve para probar servicios que solo escuchan en localhost del server.
     headers_json: headers como JSON opcional.
+
+    a_archivo: si se da, el cuerpo de la respuesta se GUARDA en esa ruta del
+    lugar (relativa a su raíz) y solo vuelven status + tamaño + ruta. Es la
+    forma correcta para respuestas grandes (JSON de APIs, dumps): las
+    respuestas gigantes inline atascan el transporte MCP. Después procesar
+    el archivo con leer / buscar_contenido / run.
+    max_salida: tope de chars del cuerpo mostrado inline (trunca con aviso).
     """
     import json
     hdrs = json.loads(headers_json) if headers_json else None
@@ -787,7 +855,9 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str = "",
     if aviso:
         return aviso
     return R.http_request(url, metodo, cuerpo or None, hdrs,
-                          params=prms, lugar=lg)
+                          params=prms, lugar=lg,
+                          a_archivo=a_archivo or None,
+                          max_salida=max_salida)
 
 
 @mcp.tool()

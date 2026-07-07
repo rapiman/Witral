@@ -9,6 +9,53 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Añadido
 
+- `psql`: parámetro `base` — apunta a otra base del mismo lugar sin tocar config
+  (override del `-d`). También en `psql_aplicar`.
+- `psql_aplicar`: parámetro `origen` — el lugar donde vive el `.sql` (por defecto el
+  mismo de la base). Witral LEE el archivo con sus tools de archivo y manda el contenido
+  por stdin al psql del lugar de la BASE, desacoplando "dónde está el .sql" de "dónde
+  corre psql". Resuelve el caso de bases detrás de túnel (el psql no ve el filesystem
+  local) sin el boilerplate psycopg.
+- `http_request`: parámetros `a_archivo` y `max_salida`. Con `a_archivo` el cuerpo de la
+  respuesta se guarda en esa ruta del lugar (curl `-o` en remoto) y solo vuelven status +
+  tamaño + ruta — respuestas grandes ya no atascan el transporte MCP (el timeout de 4 min
+  con JSON grandes). `max_salida` acota el cuerpo inline con aviso explícito de truncado.
+- `run`: parámetro `max_salida` (truncado con aviso) y directorio de trabajo fijado a la
+  raíz del lugar — las rutas relativas ahora se resuelven de forma predecible.
+- `git_publicar`: parámetro `excluir` (pathspec `:(exclude)`) para dejar archivos sueltos
+  fuera del add. Además, al agregar todo, los NUEVOS (untracked) se listan explícitamente
+  tanto en el mensaje de confirmación como en la salida — se acabaron los polizones.
+- Truncado global de salidas en `_fmt` (40k chars) con aviso explícito de cuánto se
+  muestra y cuánto había.
+- Host keys SSH con TOFU: la primera conexión a un host guarda su clave en
+  `~/.witral/known_hosts`; si después cambia, la conexión falla con aviso de posible
+  MITM en vez de aceptarla en silencio (reemplaza `AutoAddPolicy`).
+
+### Cambiado
+
+- `psql` ahora manda el SQL por **stdin** en vez de `-c`: con varias sentencias en una
+  llamada se muestran TODOS los result sets, no solo el último. Resuelve el incidente de
+  la consulta doble que ocultó un SELECT y llevó a duplicar tablas.
+- Decodificación de salida de subprocesos locales: UTF-8 primero, con fallback al
+  codepage OEM de la consola. Elimina el mojibake ("MigraciÃ³n") en la salida de commits
+  y de psql (que además ahora fija `PGCLIENTENCODING=UTF8`).
+- Blindaje anti-prompt en comandos locales: `GIT_TERMINAL_PROMPT=0` y
+  `GCM_INTERACTIVE=never` en el entorno — git falla al instante con mensaje claro en vez
+  de colgarse esperando credenciales.
+- `_ejecutar_remoto`: **EOF de stdin garantizado** (`shutdown_write` siempre). Cualquier
+  comando remoto que leyera stdin (python con `sys.stdin`, `cat`, psql) colgaba hasta el
+  timeout MCP de 4 minutos; ya no.
+- Timeout remoto con el mismo contrato que el local: devuelve código 124 con mensaje, en
+  vez de dejar subir `socket.timeout` crudo.
+- Carga de config **fail-soft por lugar**: un lugar/identidad mal formado ya no borra a
+  los demás; se cargan los válidos y se reporta solo lo roto.
+- Guard para Windows remoto: `_ejecutar_remoto` falla con mensaje claro (el quoting y
+  `cd &&` asumen shell POSIX) en vez de mandar sintaxis rota.
+- `look_for_keys` solo cuando no hay ni clave ni password configurados (evita intentos
+  de autenticación de más en servidores estrictos).
+
+### Añadido (sesión anterior)
+
 - `http_request`: parámetros `params_json` y `donde`. `params_json` recibe los query
   params como JSON y Witral los percent-encodea en Python (urlencode, UTF-8) antes de
   armar la URL, así el texto no-ASCII (ü, ñ) llega intacto sin pelear con el locale del

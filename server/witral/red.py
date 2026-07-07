@@ -28,10 +28,21 @@ def ping(lugar: Lugar, host: str, cuenta: int = 4) -> T.Resultado:
     return T.ejecutar(lugar, args, timeout=30)
 
 
+def _truncar(texto: str, limite: int) -> str:
+    """Trunca con aviso explícito de cuánto se muestra y cuánto había."""
+    if limite <= 0 or len(texto) <= limite:
+        return texto
+    return (texto[:limite] +
+            f"\n...[truncado: mostrando {limite} de {len(texto)} chars; "
+            f"para respuestas grandes usar a_archivo o subir max_salida]")
+
+
 def http_request(url: str, metodo: str = "GET", cuerpo: str | None = None,
                  headers: dict | None = None, timeout: int = 30,
                  params: dict | None = None,
-                 lugar: Lugar | None = None) -> str:
+                 lugar: Lugar | None = None,
+                 a_archivo: str | None = None,
+                 max_salida: int = 4000) -> str:
     """
     Petición HTTP/HTTPS desde un lugar. Devuelve status, headers y body
     (truncado). En local usa urllib (stdlib); en remoto arma y ejecuta curl.
@@ -43,6 +54,12 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str | None = None,
 
     'lugar': si es remoto, la petición se hace DESDE ese lugar (curl), lo que
     permite probar servicios que solo escuchan en localhost del server.
+
+    'a_archivo': si se da, el CUERPO de la respuesta se guarda en esa ruta del
+    lugar (relativa a su raíz) y se devuelve solo status + tamaño + ruta. Es
+    la forma correcta de traer respuestas grandes sin atascar el transporte
+    MCP; después se procesa el archivo con leer/buscar_contenido/run.
+    'max_salida': tope de chars del cuerpo mostrado inline (con aviso).
     """
     import urllib.parse
 
@@ -51,7 +68,8 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str | None = None,
         url = url + sep + urllib.parse.urlencode(params)
 
     if lugar is not None and not lugar.es_local:
-        return _http_remoto(lugar, url, metodo, cuerpo, headers, timeout)
+        return _http_remoto(lugar, url, metodo, cuerpo, headers, timeout,
+                            a_archivo, max_salida)
 
     import urllib.request
     import urllib.error
@@ -62,39 +80,63 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str | None = None,
         req.add_header(k, v)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read().decode("utf-8", "replace")
+            crudo = resp.read()
+            if a_archivo:
+                if lugar is None:
+                    return ("error: a_archivo requiere un lugar resuelto "
+                            "(llamar vía la tool http_request)")
+                from . import archivos as A
+                A._escribir_bytes(lugar, a_archivo, crudo)
+                return (f"HTTP {resp.status}\nGuardado en {a_archivo} "
+                        f"({lugar.nombre if lugar else 'local'}, "
+                        f"{len(crudo)} bytes). Procesar con leer / "
+                        f"buscar_contenido / run.")
+            body = crudo.decode("utf-8", "replace")
             hdrs = "\n".join(f"{k}: {v}" for k, v in resp.headers.items())
-            cuerpo_out = body if len(body) <= 4000 else body[:4000] + "\n...[truncado]"
-            return f"HTTP {resp.status}\n{hdrs}\n\n{cuerpo_out}"
+            return f"HTTP {resp.status}\n{hdrs}\n\n{_truncar(body, max_salida)}"
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace")
-        return f"HTTP {e.code} {e.reason}\n{body[:2000]}"
+        return f"HTTP {e.code} {e.reason}\n{_truncar(body, 2000)}"
     except Exception as e:
         return f"error: {e}"
 
 
 def _http_remoto(lugar: Lugar, url: str, metodo: str, cuerpo: str | None,
-                 headers: dict | None, timeout: int) -> str:
+                 headers: dict | None, timeout: int,
+                 a_archivo: str | None = None, max_salida: int = 4000) -> str:
     """
     Petición HTTP desde un lugar remoto, vía curl. La URL ya llega
     percent-encodeada (ASCII puro) desde http_request, así que la línea de
     comando es inmune a problemas de locale. El cuerpo viaja por stdin
     (--data-binary @-) para no pasar por el quoting del shell.
+    Con 'a_archivo', curl escribe la respuesta a esa ruta del lugar (-o) y
+    solo vuelven status y tamaño (respuestas grandes sin atascar el MCP).
     """
-    args = ["curl", "-sS", "-i", "--max-time", str(timeout),
-            "-X", metodo.upper()]
+    args = ["curl", "-sS", "--max-time", str(timeout), "-X", metodo.upper()]
     for k, v in (headers or {}).items():
         args += ["-H", f"{k}: {v}"]
     if cuerpo is not None:
         args += ["--data-binary", "@-"]
+    if a_archivo:
+        ruta = a_archivo
+        if not ruta.startswith("/") and lugar.raiz:
+            ruta = lugar.raiz.rstrip("/") + "/" + ruta
+        args += ["-o", ruta,
+                 "-w", "HTTP %{http_code} — %{size_download} bytes descargados"]
+    else:
+        args.append("-i")
     args.append(url)
     r = T.ejecutar(lugar, args, entrada=cuerpo, timeout=timeout + 10)
     if not r.ok and not r.salida:
         return f"error (curl en {lugar.nombre}): {r.error.strip()}"
-    salida = r.salida
-    if len(salida) > 4000:
-        salida = salida[:4000] + "\n...[truncado]"
-    out = f"[desde {lugar.nombre}]\n{salida}"
+    if a_archivo:
+        out = (f"[desde {lugar.nombre}] {r.salida.strip()}\n"
+               f"Guardado en {a_archivo}. Procesar con leer / "
+               f"buscar_contenido / run.")
+        if r.error.strip():
+            out += f"\n--- stderr ---\n{r.error.strip()}"
+        return out
+    out = f"[desde {lugar.nombre}]\n{_truncar(r.salida, max_salida)}"
     if r.error.strip():
         out += f"\n--- stderr ---\n{r.error.strip()}"
     return out

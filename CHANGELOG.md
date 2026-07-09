@@ -9,6 +9,28 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ### Añadido
 
+- **Buzón asíncrono** (nuevo módulo `trabajos.py`) — el freno nº1 del feedback: el
+  cliente MCP corta las llamadas largas (~60s), así que los trabajos de minutos no caben
+  en `run`. Tres tools nuevas:
+  - `run_async(comando, donde, confirmado)`: lanza detached y devuelve un id al
+    instante. El detach usa el patrón probado en la práctica (`setsid sh -c … </dev/null`
+    en unix/remoto; `.cmd` DETACHED con grupo propio en Windows local). cwd = raíz del
+    lugar. El estado vive en disco (`.witral/jobs/<id>/`: cmd.txt, pid, out.log, err.log,
+    codigo) y sobrevive a reinicios del servidor.
+  - `run_status(id, donde, lineas)`: corriendo/terminado + código + últimas líneas de
+    out/err. Sin id, lista los últimos trabajos del lugar. Lectura libre.
+  - `run_matar(id, donde, confirmado)`: mata el ÁRBOL completo del trabajo
+    (`taskkill /T` / kill del grupo) y lo marca como 'matado'.
+- `subir_b64(archivo, contenido_b64, donde, anexar_trozo)`: escribe BYTES decodificados
+  de base64 en el lugar — el puente para traer binarios o contenido grande desde afuera
+  (p. ej. el sandbox de análisis de Claude) sin pelear con el escapado JSON. Con
+  `anexar_trozo=True` sube archivos grandes por trozos.
+- `leer`: parámetro `cola=N` (últimas N líneas, numeradas con su número real; en remoto
+  usa tail sin bajar el archivo) y **autodefensa**: un archivo grande leído sin rango ya
+  no se vuelca entero — devuelve el comienzo + totales + cómo seguir (rango, cola o
+  buscar_contenido). Resuelve el tope de tokens con results.tsv y similares.
+- `WITRAL_PARA_CLAUDE.md`: nueva sección "Recetario" con lo que NO se puede hacer y sus
+  alternativas (trabajos largos, puente sandbox↔lugar, archivos grandes, etc.).
 - `psql`: parámetro `base` — apunta a otra base del mismo lugar sin tocar config
   (override del `-d`). También en `psql_aplicar`.
 - `psql_aplicar`: parámetro `origen` — el lugar donde vive el `.sql` (por defecto el

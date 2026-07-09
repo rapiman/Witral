@@ -29,6 +29,7 @@ from . import movil as M
 from . import sistema as S
 from . import busqueda as B
 from . import sintaxis as SX
+from . import trabajos as TR
 from .config import DestinoDesconocido
 from .seguridad import RutaFueraDeRaiz
 
@@ -105,18 +106,34 @@ def lugares() -> str:
 # --- Archivos ---------------------------------------------------------------
 
 @mcp.tool()
-def leer(archivo: str, desde: int = 0, hasta: int = 0, donde: str = "local") -> str:
+def leer(archivo: str, desde: int = 0, hasta: int = 0, donde: str = "local",
+         cola: int = 0) -> str:
     """
     Lee un archivo. Sin desde/hasta: archivo completo (chicos). Con desde/hasta:
-    solo ese rango de líneas, numeradas (forma correcta de mirar archivos grandes).
+    solo ese rango de líneas, numeradas (forma correcta de mirar archivos
+    grandes). Con cola=N: las últimas N líneas (logs, resultados). Autodefensa:
+    un archivo grande leído sin rango no se vuelca entero — se devuelve el
+    comienzo + totales + cómo seguir (rango, cola o buscar_contenido).
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
+        if cola:
+            return A.leer_cola(lg, archivo, cola)
         if desde or hasta:
             return A.leer_rango(lg, archivo, desde, hasta)
-        return A.leer(lg, archivo)
+        texto = A.leer(lg, archivo)
+        if len(texto) > _MAX_SALIDA:
+            lineas = texto.count("\n") + 1
+            corte = texto[:_MAX_SALIDA]
+            hasta_linea = corte.count("\n") + 1
+            return (corte +
+                    f"\n...[autodefensa: el archivo tiene {lineas} líneas / "
+                    f"{len(texto)} chars; se muestran ~{hasta_linea} líneas. "
+                    f"Seguir con desde/hasta (rango), cola=N (final) o "
+                    f"buscar_contenido (grep)]")
+        return texto
     except (RutaFueraDeRaiz, FileNotFoundError, ValueError) as e:
         return f"error: {e}"
 
@@ -219,6 +236,26 @@ def escribir(archivo: str, contenido: str, donde: str = "local") -> str:
     try:
         return A.escribir(lg, archivo, contenido)
     except RutaFueraDeRaiz as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
+def subir_b64(archivo: str, contenido_b64: str, donde: str = "local",
+              anexar_trozo: bool = False) -> str:
+    """
+    Escribe BYTES (decodificados de base64) en un archivo del lugar. Es el
+    puente para traer contenido binario o grande desde afuera (p. ej. desde el
+    sandbox de análisis de Claude) sin pelear con el escapado de texto JSON.
+    Con anexar_trozo=True agrega al final del archivo: subir archivos grandes
+    en trozos de ~100-200 KB de base64 por llamada. Acepta base64 con o sin
+    saltos de línea.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        return A.subir_b64(lg, archivo, contenido_b64, anexar_trozo)
+    except (RutaFueraDeRaiz, A.EdicionError) as e:
         return f"error: {e}"
 
 
@@ -444,6 +481,74 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
         # cwd = raíz del lugar (si está definida): rutas relativas predecibles.
         return _fmt(T.ejecutar(lg, comando, cwd=lg.raiz or None),
                     max_salida=max_salida)
+    except T.TransporteError as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
+def run_async(comando: str, donde: str = "local", confirmado: bool = False) -> str:
+    """
+    Lanza un comando LARGO en segundo plano (detached) y devuelve un id al
+    instante. Es la forma correcta de correr trabajos de minutos: el cliente
+    MCP corta las llamadas largas (~60s), así que `run` no sirve para eso.
+    Ciclo: run_async -> polling con run_status(id) -> (si hace falta)
+    run_matar(id). La salida queda en .witral/jobs/<id>/ del lugar (out.log,
+    err.log, codigo) y sobrevive a reinicios. cwd = raíz del lugar.
+    Como `run`, SIEMPRE requiere confirmado=True.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    if not confirmado:
+        extra = " (LUGAR SENSIBLE)" if lg.sensible else ""
+        return (
+            f"CONFIRMACIÓN REQUERIDA{extra}: run_async ejecutará en segundo plano "
+            f"en '{donde}':\n  {comando}\n"
+            f"Mostrá el comando al usuario y reintentá con confirmado=True."
+        )
+    try:
+        jid = TR.lanzar(lg, comando)
+        return (f"Trabajo lanzado: id {jid} en {donde}.\n"
+                f"Consultar con run_status(id=\"{jid}\", donde=\"{donde}\"); "
+                f"matar con run_matar si hace falta.")
+    except T.TransporteError as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
+def run_status(id: str = "", donde: str = "local", lineas: int = 40) -> str:
+    """
+    Estado de un trabajo lanzado con run_async: corriendo/terminado, código de
+    salida y las últimas 'lineas' de out.log y err.log. Sin id, lista los
+    últimos trabajos del lugar. Lectura libre (no pide confirmación).
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        if not id:
+            return TR.listar(lg)
+        return TR.estado(lg, id, lineas)
+    except T.TransporteError as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
+def run_matar(id: str, donde: str = "local", confirmado: bool = False) -> str:
+    """
+    Mata un trabajo lanzado con run_async: termina el ÁRBOL completo de
+    procesos (taskkill /T en Windows, kill del grupo en unix) y marca el
+    trabajo como 'matado'. Requiere confirmado=True.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    if not confirmado:
+        return (f"CONFIRMACIÓN REQUERIDA: run_matar terminará el trabajo '{id}' "
+                f"en '{donde}' con todo su árbol de procesos. "
+                f"Reintentá con confirmado=True.")
+    try:
+        return TR.matar(lg, id)
     except T.TransporteError as e:
         return f"error: {e}"
 

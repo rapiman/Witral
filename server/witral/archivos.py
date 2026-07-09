@@ -72,6 +72,55 @@ def leer_rango(lugar: Lugar, ruta: str, desde: int, hasta: int) -> str:
     )
 
 
+def leer_cola(lugar: Lugar, ruta: str, n: int) -> str:
+    """
+    Últimas n líneas del archivo, numeradas con su número real. Es la forma
+    correcta de mirar el final de logs y resultados grandes. En remoto usa
+    tail (no baja el archivo entero).
+    """
+    if n < 1:
+        raise ValueError("cola debe ser >= 1")
+    if not lugar.es_local:
+        from .seguridad import RutaFueraDeRaiz  # noqa: F401 (consistencia de errores)
+        r = T.ejecutar(lugar, ["tail", "-n", str(n), ruta], timeout=30)
+        if not r.ok:
+            raise FileNotFoundError(r.error.strip() or f"tail falló sobre {ruta}")
+        return r.salida.rstrip("\n")
+    texto = _decodificar(_leer_bytes(lugar, ruta))
+    lineas = texto.splitlines()
+    total = len(lineas)
+    seleccion = lineas[max(0, total - n):]
+    desde = total - len(seleccion) + 1
+    ancho = len(str(total))
+    return "\n".join(f"{str(desde + i).rjust(ancho)}\t{l}"
+                     for i, l in enumerate(seleccion))
+
+
+def subir_b64(lugar: Lugar, ruta: str, contenido_b64: str,
+              anexar_trozo: bool = False) -> str:
+    """
+    Escribe BYTES decodificados de base64 en el lugar. Es el puente para traer
+    contenido binario o grande desde afuera (p. ej. el sandbox de Claude) sin
+    pelear con el escapado de texto. Con anexar_trozo=True agrega al final:
+    permite subir archivos grandes por trozos en varias llamadas.
+    """
+    import base64
+    import re as _re
+    limpio = _re.sub(r"\s+", "", contenido_b64 or "")
+    try:
+        data = base64.b64decode(limpio, validate=True)
+    except Exception as e:
+        raise EdicionError(f"base64 inválido: {e}")
+    if anexar_trozo:
+        try:
+            data = _leer_bytes(lugar, ruta) + data
+        except FileNotFoundError:
+            pass
+    _escribir_bytes(lugar, ruta, data)
+    modo = "anexado (trozo)" if anexar_trozo else "escrito"
+    return f"{ruta}: {modo} en {lugar.nombre}, ahora {len(data)} bytes."
+
+
 # --- Escritura simple -------------------------------------------------------
 
 def escribir(lugar: Lugar, ruta: str, contenido: str) -> str:

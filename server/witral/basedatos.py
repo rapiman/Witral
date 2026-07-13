@@ -31,6 +31,98 @@ def es_destructivo(sql: str) -> bool:
     return bool(_DESTRUCTIVO.search(limpio))
 
 
+def partir_sentencias(sql: str) -> list[str]:
+    """
+    Parte un bloque SQL en sentencias por ';' de tope, respetando strings
+    ('...'  y "..."), comentarios (-- de línea y /* */ de bloque) y
+    dollar-quoting ($tag$...$tag$). Devuelve las sentencias con texto (sin las
+    vacías); el ';' NO se incluye. Es una heurística suficiente para separar
+    lecturas de escrituras, no un parser completo de SQL.
+    """
+    sentencias: list[str] = []
+    buf: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        c = sql[i]
+        par = sql[i:i + 2]
+        # Comentario de línea.
+        if par == "--":
+            j = sql.find("\n", i)
+            j = n if j == -1 else j + 1
+            buf.append(sql[i:j])
+            i = j
+            continue
+        # Comentario de bloque.
+        if par == "/*":
+            j = sql.find("*/", i + 2)
+            j = n if j == -1 else j + 2
+            buf.append(sql[i:j])
+            i = j
+            continue
+        # Dollar-quoting: $tag$ ... $tag$ (tag alfanumérico o vacío).
+        if c == "$":
+            m = re.match(r"\$[A-Za-z0-9_]*\$", sql[i:])
+            if m:
+                etiqueta = m.group(0)
+                fin = sql.find(etiqueta, i + len(etiqueta))
+                fin = n if fin == -1 else fin + len(etiqueta)
+                buf.append(sql[i:fin])
+                i = fin
+                continue
+        # Strings con comilla simple o doble (dobla-comilla escapa).
+        if c in ("'", '"'):
+            j = i + 1
+            while j < n:
+                if sql[j] == c:
+                    if j + 1 < n and sql[j + 1] == c:
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            buf.append(sql[i:j])
+            i = j
+            continue
+        if c == ";":
+            texto = "".join(buf).strip()
+            if texto:
+                sentencias.append(texto)
+            buf = []
+            i += 1
+            continue
+        buf.append(c)
+        i += 1
+    resto = "".join(buf).strip()
+    if resto:
+        sentencias.append(resto)
+    return sentencias
+
+
+def separar_lectura_escritura(sql: str) -> tuple[list[str], list[str]]:
+    """
+    Separa un bloque en (lecturas, escrituras) sentencia a sentencia, con la
+    MISMA heurística es_destructivo por sentencia. Una sentencia que no matchea
+    ninguna palabra destructiva es lectura; el resto, escritura. Permite correr
+    las lecturas sin confirmación y pedirla solo por las escrituras.
+    """
+    lecturas, escrituras = [], []
+    for s in partir_sentencias(sql):
+        (escrituras if es_destructivo(s) else lecturas).append(s)
+    return lecturas, escrituras
+
+
+def _fallo_conexion(err: str) -> bool:
+    """¿El stderr de psql delata una caída de CONEXIÓN (no un error de SQL)?"""
+    e = (err or "").lower()
+    señales = (
+        "10054", "could not receive data from server",
+        "server closed the connection unexpectedly",
+        "could not connect", "connection reset", "connection refused",
+        "no connection to the server", "terminating connection",
+    )
+    return any(s in e for s in señales)
+
+
 def _base_args(db: DBConfig) -> list[str]:
     args = [db.cliente]
     # Modo peer (db.como): conexión por socket local como usuario del sistema.
@@ -71,7 +163,10 @@ def psql_comando(lugar: Lugar, comando: str, base: str | None = None) -> T.Resul
     db = _con_base(lugar.requiere_db(), base)
     args = _base_args(db)
     entrada = comando if comando.endswith("\n") else comando + "\n"
-    return _correr(lugar, db, args, entrada=entrada)
+    # Solo reintentar en caída de conexión si NO es destructivo: reintentar una
+    # escritura podría duplicar efectos. Las lecturas se reintentan sin riesgo.
+    return _correr(lugar, db, args, entrada=entrada,
+                   reintentable=not es_destructivo(comando))
 
 
 def psql_archivo(lugar: Lugar, ruta_sql: str, origen: Lugar | None = None,
@@ -97,18 +192,20 @@ def psql_archivo(lugar: Lugar, ruta_sql: str, origen: Lugar | None = None,
 
 
 def _correr(lugar: Lugar, db: DBConfig, args: list[str],
-            entrada: str | None = None) -> T.Resultado:
+            entrada: str | None = None, reintentable: bool = False) -> T.Resultado:
     # Entorno común: timeout de conexión corto (no colgarse si la base no
     # responde) y salida en UTF-8 (evita mojibake al decodificar).
     env_extra = {"PGCONNECT_TIMEOUT": "10", "PGCLIENTENCODING": "UTF8"}
-    if lugar.es_local:
-        if db.password:
-            env_extra["PGPASSWORD"] = db.password
-        # Con -w en los args, si la base pide password y no hay credencial,
-        # psql falla al instante en vez de esperar un prompt.
-        return T.ejecutar(lugar, args, entrada=entrada, timeout=60,
-                          env_extra=env_extra)
-    else:
+
+    def _una_vez() -> T.Resultado:
+        if lugar.es_local:
+            e2 = dict(env_extra)
+            if db.password:
+                e2["PGPASSWORD"] = db.password
+            # Con -w en los args, si la base pide password y no hay credencial,
+            # psql falla al instante en vez de esperar un prompt.
+            return T.ejecutar(lugar, args, entrada=entrada, timeout=60,
+                              env_extra=e2)
         linea = " ".join(_q(a) for a in args)
         prefijo = " ".join(f"{k}={_q(v)}" for k, v in env_extra.items())
         if db.como:
@@ -117,10 +214,22 @@ def _correr(lugar: Lugar, db: DBConfig, args: list[str],
             # 'env' para que las variables lleguen al proceso bajo sudo.
             linea = f"sudo -u {_q(db.como)} env {prefijo} {linea}"
         else:
+            pref = prefijo
             if db.password:
-                prefijo = f"PGPASSWORD={_q(db.password)} {prefijo}"
-            linea = f"{prefijo} {linea}"
+                pref = f"PGPASSWORD={_q(db.password)} {prefijo}"
+            linea = f"{pref} {linea}"
         return T.ejecutar(lugar, linea, entrada=entrada, timeout=60)
+
+    r = _una_vez()
+    # Reintento único ante caída de CONEXIÓN (no error de SQL). Solo cuando el
+    # llamador marcó la operación como segura de repetir (lectura): absorbe el
+    # WinError 10054 / "server closed the connection" transitorio sin arriesgar
+    # duplicar una escritura.
+    if reintentable and r.codigo != 0 and _fallo_conexion(r.error):
+        import time as _t
+        _t.sleep(1.0)
+        r = _una_vez()
+    return r
 
 
 def _q(s: str) -> str:

@@ -43,6 +43,14 @@ def _dir_jobs_local(lugar: Lugar) -> Path:
 
 _DIR_REMOTO = ".witral/jobs"  # relativo al home del lugar remoto
 
+# Tope de espera POR LLAMADA de run_esperar. El cliente MCP corta las llamadas
+# largas (~45s), así que no se puede bloquear 10 minutos de un saque: cada
+# run_esperar espera a lo sumo esto y, si el trabajo sigue, pide volver a
+# llamar. Aun así colapsa el polling: una llamada cubre ~40s y vuelve al
+# instante cuando el trabajo termina (chequeo cada 1-3s), en vez de decenas de
+# sleep+run_status a ciegas.
+_TOPE_ESPERA = 40
+
 
 # --- Lanzar -------------------------------------------------------------------
 
@@ -65,9 +73,12 @@ def lanzar(lugar: Lugar, comando: str) -> str:
                 f"echo %errorlevel% > \"{cod}\"\r\n",
                 encoding="utf-8",
             )
+            # CREATE_NO_WINDOW (consola OCULTA propia) y NO DETACHED_PROCESS:
+            # son excluyentes, y sin consola las console-apps (ping, timeout,
+            # el host de powershell) corren mudas o mueren al instante.
+            # Verificado con A/B: DETACHED => out vacío; NO_WINDOW => captura OK.
             flags = (subprocess.CREATE_NEW_PROCESS_GROUP
-                     | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
-                     | getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                     | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
             proc = subprocess.Popen(
                 ["cmd", "/c", str(bat)], cwd=lugar.raiz,
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -177,6 +188,59 @@ def estado(lugar: Lugar, jid: str, lineas: int = 40) -> str:
     )
     r = T.ejecutar(lugar, linea, timeout=30)
     return r.salida if r.ok else f"error: {r.error or r.salida}"
+
+
+# --- Esperar (bloqueo del lado servidor) -------------------------------------
+
+def _estado_rapido(lugar: Lugar, jid: str) -> str:
+    """Chequeo LIVIANO del estado de un trabajo: 'no_existe'|'terminado'|'corriendo'.
+    Local: solo mira archivos en disco (barato). Remoto: un SSH corto."""
+    if lugar.es_local:
+        base = _dir_jobs_local(lugar) / jid
+        if not base.exists():
+            return "no_existe"
+        return "terminado" if (base / "codigo").exists() else "corriendo"
+    b = f"{_DIR_REMOTO}/{jid}"
+    linea = (f"if [ ! -d {_q(b)} ]; then echo no_existe; "
+             f"elif [ -f {_q(b)}/codigo ]; then echo terminado; "
+             f"else echo corriendo; fi")
+    r = T.ejecutar(lugar, linea, timeout=20)
+    est = (r.salida or "").strip()
+    return est if est in ("no_existe", "terminado", "corriendo") else "corriendo"
+
+
+def esperar(lugar: Lugar, jid: str, hasta_segundos: int = 600,
+            lineas: int = 40) -> str:
+    """
+    Bloquea del lado de Witral hasta que el trabajo termine, y devuelve su
+    estado final. Evita el polling manual con sleep+run_status.
+
+    Como el cliente MCP corta las llamadas largas, cada llamada espera a lo
+    sumo _TOPE_ESPERA s: si el trabajo termina antes, vuelve al instante; si
+    sigue corriendo al llegar al tope, devuelve el estado parcial e indica
+    volver a llamar. 'hasta_segundos' es el techo que pide el usuario, pero se
+    acota a _TOPE_ESPERA por llamada.
+    """
+    presupuesto = min(max(1, int(hasta_segundos)), _TOPE_ESPERA)
+    intervalo = 1.0 if lugar.es_local else 3.0
+    t0 = time.time()
+    while True:
+        est = _estado_rapido(lugar, jid)
+        if est == "no_existe":
+            return (f"No existe el trabajo '{jid}' en {lugar.nombre}. "
+                    f"Ver run_status sin id.")
+        if est == "terminado":
+            return estado(lugar, jid, lineas)
+        transcurrido = time.time() - t0
+        if transcurrido >= presupuesto:
+            parcial = estado(lugar, jid, lineas)
+            return (parcial + f"\n\n[run_esperar: sigue CORRIENDO tras "
+                    f"~{int(transcurrido)}s. El cliente MCP corta las llamadas "
+                    f"largas, por eso la espera se topa en ~{_TOPE_ESPERA}s. "
+                    f"Volvé a llamar run_esperar(id=\"{jid}\", donde=\""
+                    f"{lugar.nombre}\") para seguir esperando.]")
+        # No pasarse del presupuesto en el último sleep.
+        time.sleep(min(intervalo, max(0.2, presupuesto - transcurrido)))
 
 
 def listar(lugar: Lugar, maximo: int = 15) -> str:

@@ -293,6 +293,27 @@ def _quote(s: str) -> str:
     return "'" + s.replace("'", "'\\''") + "'"
 
 
+def _es_error_conexion(e: Exception) -> bool:
+    """¿La excepción delata una conexión muerta/reseteada (no un error lógico)?"""
+    if isinstance(e, (EOFError, ConnectionResetError, BrokenPipeError)):
+        return True
+    txt = str(e).lower()
+    return any(s in txt for s in (
+        "10054", "forcibly closed", "reset by peer", "connection reset",
+        "session not active", "not active", "broken pipe", "socket is closed",
+    ))
+
+
+def _descartar_cliente(lugar: Lugar) -> None:
+    """Saca el cliente del cache y lo cierra, para forzar reconexión limpia."""
+    cli = _clientes.pop(lugar.nombre, None)
+    if cli is not None:
+        try:
+            cli.close()
+        except Exception:
+            pass
+
+
 def _ejecutar_remoto(lugar, argv, *, cwd, entrada, timeout,
                      env_extra=None) -> Resultado:
     # _quote y "cd &&" asumen shell POSIX: un Windows remoto por SSH aún no
@@ -302,7 +323,6 @@ def _ejecutar_remoto(lugar, argv, *, cwd, entrada, timeout,
             f"El lugar '{lugar.nombre}' es Windows remoto: la ejecución remota "
             f"de Witral hoy asume shell POSIX (quoting y 'cd &&'). No soportado."
         )
-    cli = _cliente_ssh(lugar)
     if isinstance(argv, list):
         linea = " ".join(_quote(a) for a in argv)
     else:
@@ -313,21 +333,44 @@ def _ejecutar_remoto(lugar, argv, *, cwd, entrada, timeout,
     if cwd:
         linea = f"cd {_quote(cwd)} && {linea}"
     import socket as _socket
-    try:
-        stdin, stdout, stderr = cli.exec_command(linea, timeout=timeout)
-        # EOF de stdin SIEMPRE: sin esto, cualquier comando remoto que lea
-        # stdin (python -c con sys.stdin, cat, psql, etc.) queda esperando
-        # entrada hasta el timeout del MCP (el cuelgue de 4 minutos).
-        if entrada is not None:
-            stdin.write(entrada)
-        stdin.channel.shutdown_write()
-        salida = stdout.read().decode("utf-8", "replace")
-        error = stderr.read().decode("utf-8", "replace")
-        codigo = stdout.channel.recv_exit_status()
-    except _socket.timeout:
-        # Mismo contrato que en local: timeout => código 124, no excepción cruda.
-        return Resultado(124, "", f"timeout tras {timeout}s (remoto {lugar.nombre})")
-    return Resultado(codigo, salida, error)
+
+    # Hasta 2 intentos, pero SOLO reintenta si el canal no llegó a abrirse (el
+    # comando no corrió): así absorbe la conexión cacheada muerta (WinError
+    # 10054, "reset by peer") sin arriesgar repetir un comando ya lanzado.
+    intentos = 2
+    for intento in range(1, intentos + 1):
+        cli = _cliente_ssh(lugar)
+        try:
+            stdin, stdout, stderr = cli.exec_command(linea, timeout=timeout)
+        except Exception as e:
+            if intento < intentos and _es_error_conexion(e):
+                _descartar_cliente(lugar)
+                continue
+            raise TransporteError(_diagnostico_ssh(e, lugar.nombre))
+        try:
+            # EOF de stdin SIEMPRE: sin esto, cualquier comando remoto que lea
+            # stdin (python -c con sys.stdin, cat, psql, etc.) queda esperando
+            # entrada hasta el timeout del MCP (el cuelgue de 4 minutos).
+            if entrada is not None:
+                stdin.write(entrada)
+            stdin.channel.shutdown_write()
+            salida = stdout.read().decode("utf-8", "replace")
+            error = stderr.read().decode("utf-8", "replace")
+            codigo = stdout.channel.recv_exit_status()
+        except _socket.timeout:
+            # Mismo contrato que en local: timeout => código 124, no excepción.
+            return Resultado(124, "", f"timeout tras {timeout}s (remoto {lugar.nombre})")
+        except Exception as e:
+            # Cayó DESPUÉS de lanzar el comando: no se sabe si corrió parcial.
+            # No reintentar en silencio (podría duplicar una escritura); avisar.
+            _descartar_cliente(lugar)
+            if _es_error_conexion(e):
+                return Resultado(1, "", (
+                    f"conexión perdida durante el comando en {lugar.nombre} ({e}). "
+                    f"No se reintentó para no duplicar efectos; verificá el estado "
+                    f"con una lectura y reintentá si corresponde."))
+            raise TransporteError(_diagnostico_ssh(e, lugar.nombre))
+        return Resultado(codigo, salida, error)
 
 
 # --- Transferencia de archivos (SFTP) --------------------------------------

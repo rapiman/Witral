@@ -7,6 +7,58 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 4 — feedback de la sesión de dos días (25 commits / ~40 migraciones)
+
+Fricciones ordenadas por dolor. Implementado y validado (py_compile de cada
+archivo + tests de lógica pura del splitter SQL, el parser de rutas, el armado
+de contexto de grep y la rotación de backups). PENDIENTE el reinicio para
+cargar y la verificación en vivo.
+
+**Añadido**
+- `run_esperar(id, hasta_segundos, lineas, donde)` — el freno nº1: esperar
+  escaneos largos obligaba a decenas de `sleep 44` + `run_status` a ciegas.
+  Ahora Witral bloquea del lado servidor y vuelve AL INSTANTE cuando el trabajo
+  termina (chequeo liviano cada 1-3s). Como el cliente MCP corta las llamadas
+  largas, cada llamada se topa en ~40s y, si sigue, pide volver a llamar —
+  igual colapsa el polling.
+- `desplegar(origen, destino, servicio, prueba_url, espera, confirmado)` — el
+  patrón más repetido de la sesión (copiar → restart → esperar → curl de humo)
+  en UNA llamada. origen/destino en forma compacta `lugar:ruta`. Requiere
+  confirmado=True (escribe en server + reinicia servicio).
+
+**Mejorado**
+- `buscar_contenido`: parámetros `antes`/`despues` (contexto -B/-A de grep). El
+  match llega con su entorno, sin un `leer` posterior. Grupos separados con `--`
+  y líneas de contexto con `-` (estilo grep). Sin contexto, formato clásico.
+- `copiar`: forma compacta `origen="local:folil/web/app.py"`,
+  `destino="wedwed:/srv/…"` (además de los 4 parámetros explícitos). El prefijo
+  se toma como lugar solo si es un lugar conocido, así `C:\…` y `/srv/…` no se
+  confunden.
+- `psql`: en lugar NO sensible con bloque MIXTO (SELECT + UPDATE), corre las
+  LECTURAS al toque y pide confirmación solo por las ESCRITURAS — se acabó el
+  doble viaje por un SELECT escondido entre escrituras.
+- `editar_linea`: `hasta` es opcional (toma `desde`) — para una sola línea ya no
+  hay que repetir el número.
+
+**Corregido / robustez**
+- Reintento ante caída de conexión (WinError 10054 / "server closed the
+  connection"): en remoto, si el canal SSH cacheado está muerto y el comando NO
+  llegó a correr, se reconecta y reintenta una vez (si cae DESPUÉS de lanzar, no
+  se reintenta en silencio, para no duplicar escrituras); en psql local, un
+  reintento único ante caída de conexión SOLO para lecturas.
+- Rotación de backups: `.witral/bak` ya no crece sin límite. Se conservan los 12
+  backups más nuevos de cada archivo y se podan los de más de 30 días (local y
+  remoto).
+
+### Corregido
+
+- `run_async` en Windows local: el lanzamiento usaba `DETACHED_PROCESS` combinado con
+  `CREATE_NO_WINDOW` (flags mutuamente excluyentes); sin consola, las console-apps
+  (ping, timeout, el host de powershell) corrían mudas o morían al instante con salida
+  vacía. Ahora solo `CREATE_NO_WINDOW` (consola oculta propia): verificado con A/B que
+  powershell y ping capturan su salida completa. El resto del ciclo (echo/dir, estado,
+  matar árbol, listar) ya había pasado la verificación en vivo.
+
 ### Añadido
 
 - **Buzón asíncrono** (nuevo módulo `trabajos.py`) — el freno nº1 del feedback: el

@@ -44,13 +44,22 @@ def buscar_nombre(lugar: Lugar, proyecto: str, patron: str) -> str:
 
 
 def buscar_contenido(lugar: Lugar, objetivo: str, patron: str,
-                     incluir: list[str] | None = None) -> str:
+                     incluir: list[str] | None = None,
+                     antes: int = 0, despues: int = 0) -> str:
     """
     grep de contenido (regex) en un ARCHIVO o una CARPETA/proyecto.
     Si 'objetivo' es un archivo, busca solo ahí. Si es carpeta, recorre recursivo
-    aplicando los globs 'incluir'. Salida: ruta:linea: texto.
+    aplicando los globs 'incluir'.
+
+    'antes'/'despues': líneas de CONTEXTO antes/después de cada match (como -B/-A
+    de grep). Con 0 (por defecto) sale una línea por match: `ruta:linea: texto`.
+    Con contexto, las líneas de contexto salen con '-' en vez de ':'
+    (`ruta-linea- texto`) y los grupos separados se separan con '--', para que
+    el match y su alrededor lleguen sin un `leer` posterior.
     """
     incluir = incluir or _INCLUIR_DEFAULT
+    antes = max(0, antes)
+    despues = max(0, despues)
     if lugar.es_local:
         base = normalizar(lugar.raiz, objetivo)
         rx = re.compile(patron)
@@ -61,9 +70,32 @@ def buscar_contenido(lugar: Lugar, objetivo: str, patron: str,
                 texto = p.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 return
-            for i, linea in enumerate(texto.splitlines(), start=1):
-                if rx.search(linea):
-                    out.append(f"{etiqueta}:{i}: {linea.strip()}")
+            lineas = texto.splitlines()
+            matches = [i for i, l in enumerate(lineas) if rx.search(l)]
+            if not matches:
+                return
+            if antes == 0 and despues == 0:
+                for i in matches:
+                    out.append(f"{etiqueta}:{i + 1}: {lineas[i].strip()}")
+                return
+            # Con contexto: unir en rangos contiguos (fusiona solapes) y emitir
+            # cada grupo separado por '--', al estilo grep -A/-B.
+            n = len(lineas)
+            rangos: list[list[int]] = []
+            for i in matches:
+                a = max(0, i - antes)
+                b = min(n - 1, i + despues)
+                if rangos and a <= rangos[-1][1] + 1:
+                    rangos[-1][1] = max(rangos[-1][1], b)
+                else:
+                    rangos.append([a, b])
+            mset = set(matches)
+            for k, (a, b) in enumerate(rangos):
+                if k > 0:
+                    out.append("--")
+                for j in range(a, b + 1):
+                    sep = ":" if j in mset else "-"
+                    out.append(f"{etiqueta}{sep}{j + 1}{sep} {lineas[j].rstrip()}")
 
         if base.is_file():
             # Objetivo es un archivo único: ignorar los globs 'incluir'.
@@ -82,13 +114,18 @@ def buscar_contenido(lugar: Lugar, objetivo: str, patron: str,
                     buscar_en(p, p.relative_to(base))
         return "\n".join(out) if out else "(sin coincidencias)"
     # remoto: si es archivo, grep directo; si es carpeta, grep -rn con --include.
+    ctx = ""
+    if antes:
+        ctx += f" -B {antes}"
+    if despues:
+        ctx += f" -A {despues}"
     chk = T.ejecutar(lugar, f"test -f '{objetivo}' && echo F || echo D")
     es_archivo = (chk.salida or "").strip() == "F"
     if es_archivo:
-        cmd = f"grep -nE '{patron}' '{objetivo}'"
+        cmd = f"grep -nE{ctx} '{patron}' '{objetivo}'"
     else:
         incl = " ".join(f"--include='{g}'" for g in incluir)
         excl = " ".join(f"--exclude-dir='{e}'" for e in _EXCLUIR)
-        cmd = f"cd '{objetivo}' && grep -rnE {incl} {excl} '{patron}' ."
+        cmd = f"cd '{objetivo}' && grep -rnE{ctx} {incl} {excl} '{patron}' ."
     r = T.ejecutar(lugar, cmd)
     return r.salida or "(sin coincidencias)"

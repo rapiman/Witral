@@ -19,6 +19,23 @@ from .seguridad import normalizar
 from . import transporte as T
 
 
+def partir_lugar_ruta(spec: str, nombres, default_lugar: str = "local"):
+    """
+    Parsea la forma compacta 'lugar:ruta' -> (lugar, ruta).
+
+    El prefijo antes del PRIMER ':' se toma como lugar SOLO si es un lugar
+    conocido (está en 'nombres'). Si no lo es —una ruta Windows 'C:\\...', una
+    ruta unix '/srv/...' sin prefijo, o cualquier ':' que no sea separador de
+    lugar— se devuelve (default_lugar, spec) sin tocar. Así la sintaxis compacta
+    convive con las rutas absolutas sin ambigüedad.
+    """
+    if ":" in spec:
+        pre, resto = spec.split(":", 1)
+        if pre in nombres:
+            return pre, resto
+    return default_lugar, spec
+
+
 def copiar(cfg: Config, origen_lugar: str | None, origen_ruta: str,
            destino_lugar: str | None, destino_ruta: str) -> str:
     o = cfg.resolver(origen_lugar)

@@ -311,13 +311,17 @@ def editar_literal(archivo: str, viejo: str, nuevo: str, verificar: bool = False
 
 
 @mcp.tool()
-def editar_linea(archivo: str, desde: int, hasta: int, nuevo: str,
+def editar_linea(archivo: str, desde: int, hasta: int = 0, nuevo: str = "",
                  ancla: str = "", verificar: bool = False,
                  donde: str = "local") -> str:
     """
     Reemplaza el rango de líneas [desde, hasta] por 'nuevo'. Inmune a CRLF/
     whitespace. Backup automático y devuelve el fragmento resultante para
     verificar en el acto.
+
+    UNA SOLA LÍNEA: omití 'hasta' (o pasá 0) y toma el valor de 'desde' — no
+    hace falta repetir el número. Para vaciar/borrar una línea, dejá 'nuevo'=""
+    (o pasá varias líneas en 'nuevo' con \\n para expandir el rango).
 
     PARÁMETRO 'ancla' (muy recomendado): si lo pasás con el contenido que
     ESPERÁS que tengan esas líneas, la edición se aplica SOLO si coincide
@@ -332,6 +336,8 @@ def editar_linea(archivo: str, desde: int, hasta: int, nuevo: str,
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
+    if hasta <= 0:
+        hasta = desde  # una sola línea: hasta = desde
     try:
         if ancla:
             res = A.editar(lg, archivo,
@@ -427,12 +433,31 @@ def vaciar_papelera(donde: str = "local", confirmado: bool = False) -> str:
 # --- Mover entre lugares ----------------------------------------------------
 
 @mcp.tool()
-def copiar(origen_ruta: str, destino_lugar: str, destino_ruta: str,
+def copiar(origen: str = "", destino: str = "", origen_ruta: str = "",
+           destino_lugar: str = "", destino_ruta: str = "",
            origen_lugar: str = "local", confirmado: bool = False) -> str:
     """
-    Copia un archivo entre dos lugares (SFTP). Copiar HACIA un lugar sensible
-    (prod) requiere confirmado=True tras confirmar con el usuario.
+    Copia un archivo entre dos lugares (SFTP). Dos formas de indicar los extremos:
+
+    - COMPACTA (recomendada): origen="local:folil/web/app.py",
+      destino="wedwed:/srv/app/app.py". El prefijo antes del ':' es el lugar
+      (debe ser un lugar conocido; si no hay prefijo de lugar válido —p. ej.
+      'C:\\...' o '/srv/...'— se asume el lugar 'local' y todo es la ruta).
+    - EXPLÍCITA (compatibilidad): origen_ruta + origen_lugar +
+      destino_lugar + destino_ruta.
+
+    Copiar HACIA un lugar sensible (prod) requiere confirmado=True tras
+    confirmar con el usuario.
     """
+    # Forma compacta: si se dan, sobreescriben a los parámetros explícitos.
+    if origen:
+        origen_lugar, origen_ruta = CP.partir_lugar_ruta(origen, _cfg.nombres)
+    if destino:
+        destino_lugar, destino_ruta = CP.partir_lugar_ruta(destino, _cfg.nombres)
+    if not origen_ruta or not destino_lugar or not destino_ruta:
+        return ("Faltan datos de la copia. Usá la forma compacta "
+                "(origen=\"lugar:ruta\", destino=\"lugar:ruta\") o la explícita "
+                "(origen_ruta, destino_lugar, destino_ruta).")
     d, aviso = _resolver(destino_lugar)
     if aviso:
         return aviso
@@ -449,6 +474,75 @@ def copiar(origen_ruta: str, destino_lugar: str, destino_ruta: str,
         return CP.copiar(_cfg, origen_lugar, origen_ruta, destino_lugar, destino_ruta)
     except (RutaFueraDeRaiz, FileNotFoundError, T.TransporteError) as e:
         return f"error: {e}"
+
+
+@mcp.tool()
+def desplegar(origen: str, destino: str, servicio: str = "",
+              prueba_url: str = "", espera: float = 3.0,
+              confirmado: bool = False) -> str:
+    """
+    Despliegue en UNA pasada: copia un archivo al server, reinicia un servicio y
+    hace una prueba de humo HTTP. Combina el patrón más repetido
+    (copiar -> restart -> esperar -> curl) en una sola llamada.
+
+    origen/destino: forma compacta 'lugar:ruta' (como copiar). Ej.:
+      origen="local:folil/web/app.py", destino="folil:/srv/app/app.py".
+      El servicio y la prueba de humo corren en el lugar de DESTINO.
+    servicio: servicio a reiniciar en el destino (vacío = no reinicia).
+    prueba_url: si se da, tras 'espera' segundos hace GET y reporta el status
+      (curl DESDE el lugar de destino: sirve para endpoints en localhost del
+      server). espera: segundos entre restart y prueba de humo (tope 30).
+
+    Escribe en un server y reinicia un servicio => requiere confirmado=True;
+    reforzado si el destino es sensible. Si un paso falla, corta y lo reporta.
+    """
+    import time as _time
+    origen_lugar, origen_ruta = CP.partir_lugar_ruta(origen, _cfg.nombres)
+    destino_lugar, destino_ruta = CP.partir_lugar_ruta(destino, _cfg.nombres)
+    if not origen_ruta or not destino_lugar or not destino_ruta:
+        return ("Faltan datos. Usá origen=\"lugar:ruta\" y destino=\"lugar:ruta\" "
+                "(ej. destino=\"folil:/srv/app/app.py\").")
+    d, aviso = _resolver(destino_lugar)
+    if aviso:
+        return aviso
+    o, aviso = _resolver(origen_lugar)
+    if aviso:
+        return aviso
+    if not confirmado:
+        extra = " (LUGAR SENSIBLE)" if d.sensible else ""
+        pasos = [f"1) copiar {origen_lugar}:{origen_ruta} -> "
+                 f"{destino_lugar}:{destino_ruta}"]
+        if servicio:
+            pasos.append(f"2) reiniciar servicio '{servicio}' en {destino_lugar}")
+        if prueba_url:
+            pasos.append(f"3) esperar {espera}s y probar {prueba_url}")
+        return (f"CONFIRMACIÓN REQUERIDA: desplegar en '{destino_lugar}'{extra}.\n"
+                + "\n".join(pasos) +
+                "\nConfirmá con el usuario y reintentá con confirmado=True.")
+    partes = []
+    # 1) copiar (si falla, se aborta: no tiene sentido reiniciar con lo viejo).
+    try:
+        r_copia = CP.copiar(_cfg, origen_lugar, origen_ruta,
+                            destino_lugar, destino_ruta)
+        partes.append("COPIA: " + r_copia)
+    except (RutaFueraDeRaiz, FileNotFoundError, T.TransporteError) as e:
+        return f"DESPLIEGUE ABORTADO en la copia: {e}"
+    # 2) restart.
+    if servicio:
+        rs = S.servicio(d, "restart", servicio)
+        partes.append(f"RESTART ({servicio}):\n{_fmt(rs)}")
+        if not rs.ok:
+            partes.append("⚠️  el restart devolvió error: revisá antes de "
+                          "confiar en la prueba de humo.")
+    # 3) prueba de humo.
+    if prueba_url:
+        espera_cap = max(0.0, min(float(espera), 30.0))
+        if espera_cap:
+            _time.sleep(espera_cap)
+        prueba = R.http_request(prueba_url, "GET", None, None, lugar=d,
+                                max_salida=2000)
+        partes.append(f"PRUEBA DE HUMO {prueba_url}:\n{prueba}")
+    return "\n\n".join(partes)
 
 
 # --- Ejecución de comandos (run) --------------------------------------------
@@ -529,6 +623,31 @@ def run_status(id: str = "", donde: str = "local", lineas: int = 40) -> str:
         if not id:
             return TR.listar(lg)
         return TR.estado(lg, id, lineas)
+    except T.TransporteError as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
+def run_esperar(id: str, hasta_segundos: int = 600, lineas: int = 40,
+                donde: str = "local") -> str:
+    """
+    Espera (del lado de Witral) a que termine un trabajo de run_async y devuelve
+    su estado final, en vez de hacer polling a mano con sleep + run_status.
+
+    Como el cliente MCP corta las llamadas largas (~45s), cada run_esperar
+    bloquea a lo sumo ~40s: si el trabajo termina antes, vuelve AL INSTANTE con
+    el código y las últimas 'lineas' de salida; si sigue corriendo al llegar al
+    tope, devuelve el estado parcial y hay que VOLVER A LLAMAR run_esperar(id)
+    para seguir esperando. Aun con el tope, colapsa el polling: una sola llamada
+    cubre la espera y detecta el fin en 1-3s (no en el próximo sleep a ciegas).
+    'hasta_segundos' es el techo deseado; se acota al tope por llamada. Lectura
+    libre (no pide confirmación).
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        return TR.esperar(lg, id, hasta_segundos, lineas)
     except T.TransporteError as e:
         return f"error: {e}"
 
@@ -619,6 +738,24 @@ def psql(donde: str, comando: str, confirmado: bool = False,
         return aviso
     destructivo = DB.es_destructivo(comando)
     if (destructivo or lg.sensible) and not confirmado:
+        # En un lugar NO sensible con bloque MIXTO (SELECT + UPDATE, etc.), no
+        # frenar por todo: correr las LECTURAS al toque y pedir confirmación
+        # solo por las ESCRITURAS. Así el SELECT no espera una segunda llamada.
+        if destructivo and not lg.sensible:
+            lecturas, escrituras = DB.separar_lectura_escritura(comando)
+            if lecturas and escrituras:
+                try:
+                    salida = _fmt(DB.psql_comando(
+                        lg, ";\n".join(lecturas) + ";", base=base or None))
+                except Exception as e:
+                    salida = f"(las lecturas fallaron: {e})"
+                return (
+                    "LECTURAS ejecutadas (sin confirmación):\n" + salida +
+                    "\n\nCONFIRMACIÓN REQUERIDA para las ESCRITURAS "
+                    "(no se ejecutaron):\n" + ";\n".join(escrituras) + ";\n"
+                    f"Lugar: {donde}. Reintentá con confirmado=True para "
+                    "aplicar el bloque completo."
+                )
         razon = []
         if destructivo:
             razon.append("la sentencia modifica datos/esquema")
@@ -1122,19 +1259,26 @@ def buscar_nombre(proyecto: str, patron: str, donde: str = "local") -> str:
 
 @mcp.tool()
 def buscar_contenido(objetivo: str, patron: str, incluir: str = "",
+                     antes: int = 0, despues: int = 0,
                      donde: str = "local") -> str:
     """
     grep de contenido (regex) en un ARCHIVO o una CARPETA/proyecto.
     Si 'objetivo' es un archivo, busca solo en él (reemplaza al viejo
     buscar_en_archivo). Si es carpeta, recorre recursivo aplicando 'incluir'
     (globs separados por espacio; por defecto *.kt *.java *.xml *.kts *.gradle).
-    Salida: ruta:linea: texto.
+
+    'antes'/'despues': líneas de CONTEXTO antes/después de cada match (como -B/-A
+    de grep). Con contexto, las líneas de alrededor salen con '-' (ruta-linea-
+    texto) y los grupos se separan con '--' — así el match llega con su entorno
+    sin un `leer` posterior. Salida sin contexto: ruta:linea: texto.
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
-        return B.buscar_contenido(lg, objetivo, patron, incluir.split() if incluir else None)
+        return B.buscar_contenido(lg, objetivo, patron,
+                                  incluir.split() if incluir else None,
+                                  antes=antes, despues=despues)
     except RutaFueraDeRaiz as e:
         return f"error: {e}"
 

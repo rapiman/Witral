@@ -141,6 +141,54 @@ def anexar(lugar: Lugar, ruta: str, contenido: str) -> str:
 
 # --- Backup -----------------------------------------------------------------
 
+# Rotación de backups: sin esto .witral/bak crece sin límite (la fricción del
+# uso intensivo). Se conservan los _MAX_BAK_POR_ARCHIVO backups más nuevos de
+# CADA archivo, y se podan los de más de _DIAS_BAK días (cota global sobre todo
+# el árbol de backups, para archivos que ya no se tocan).
+_MAX_BAK_POR_ARCHIVO = 12
+_DIAS_BAK = 30
+
+
+def _glob_seguro(nombre: str) -> str:
+    """Escapa los metacaracteres de glob de un nombre de archivo literal."""
+    import glob as _glob
+    return _glob.escape(nombre)
+
+
+def _rotar_backups_local(bakdir: Path, nombre_base: str) -> None:
+    """Poda backups viejos: por antigüedad (global) y por cantidad (por archivo).
+    Best-effort: cualquier error al podar se ignora, nunca frena una edición."""
+    try:
+        limite = time.time() - _DIAS_BAK * 86400
+        for f in bakdir.glob("*.bak"):
+            try:
+                if f.stat().st_mtime < limite:
+                    f.unlink()
+            except Exception:
+                pass
+        # El ts del nombre es %Y%m%d-%H%M%S => orden lexicográfico = cronológico.
+        propios = sorted(bakdir.glob(_glob_seguro(nombre_base) + ".*.bak"))
+        for f in propios[:-_MAX_BAK_POR_ARCHIVO] if len(propios) > _MAX_BAK_POR_ARCHIVO else []:
+            try:
+                f.unlink()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _rotar_backups_remoto(lugar: Lugar, bakdir: str, nombre_base: str) -> None:
+    """Poda remota best-effort: deja los N backups más nuevos de este archivo."""
+    try:
+        patron = f"{bakdir}/{nombre_base}.*.bak"
+        # ls -1t = más nuevo primero; del (_MAX+1)-ésimo en adelante se borran.
+        cmd = (f"ls -1t {patron} 2>/dev/null | tail -n +{_MAX_BAK_POR_ARCHIVO + 1} "
+               f"| tr '\\n' '\\0' | xargs -0 -r rm -f")
+        T.ejecutar(lugar, cmd, timeout=15)
+    except Exception:
+        pass
+
+
 def _backup(lugar: Lugar, ruta: str, data: bytes) -> str:
     ts = time.strftime("%Y%m%d-%H%M%S")
     if lugar.es_local:
@@ -149,6 +197,7 @@ def _backup(lugar: Lugar, ruta: str, data: bytes) -> str:
         bakdir.mkdir(parents=True, exist_ok=True)
         destino = bakdir / f"{p.name}.{ts}.bak"
         destino.write_bytes(data)
+        _rotar_backups_local(bakdir, p.name)
         return str(destino)
     else:
         # A ~/.witral/bak del lugar (relativo al home remoto, igual que la
@@ -158,6 +207,7 @@ def _backup(lugar: Lugar, ruta: str, data: bytes) -> str:
         destino = f"{bakdir}/{nombre}.{ts}.bak"
         T.ejecutar(lugar, ["mkdir", "-p", bakdir])
         T.escribir_remoto(lugar, destino, data)
+        _rotar_backups_remoto(lugar, bakdir, nombre)
         return destino
 
 

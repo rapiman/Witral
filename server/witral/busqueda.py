@@ -17,7 +17,14 @@ from .seguridad import normalizar
 from . import transporte as T
 
 
-_EXCLUIR = {"build", ".gradle", ".git", ".witral", "node_modules"}
+_EXCLUIR = {
+    "build", ".gradle", ".git", ".witral", "node_modules",
+    # Entornos/artefactos de Python y editores: recorrerlos hacía que
+    # buscar_nombre/buscar_contenido se fueran a decenas de miles de líneas
+    # (p. ej. .venv con miles de .pyc). Se podan como .git.
+    ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache",
+    ".ruff_cache", "dist", ".idea", ".vscode",
+}
 _INCLUIR_DEFAULT = ["*.kt", "*.java", "*.xml", "*.kts", "*.gradle"]
 
 

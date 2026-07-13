@@ -62,6 +62,4 @@ def servicio(lugar: Lugar, accion: str, nombre: str) -> T.Resultado:
 
 # --- Helpers ----------------------------------------------------------------
 
-def _q(s: str) -> str:
-    """Comilla simple segura para shell unix."""
-    return "'" + s.replace("'", "'\\''") + "'"
+_q = T.comillas  # comilla POSIX: origen único en transporte.comillas

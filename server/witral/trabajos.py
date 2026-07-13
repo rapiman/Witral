@@ -29,8 +29,7 @@ from .config import Lugar
 from . import transporte as T
 
 
-def _q(s: str) -> str:
-    return "'" + s.replace("'", "'\\''") + "'"
+_q = T.comillas  # comilla POSIX: origen único en transporte.comillas
 
 
 def _nuevo_id() -> str:

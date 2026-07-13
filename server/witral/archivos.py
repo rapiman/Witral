@@ -488,8 +488,7 @@ def borrar(lugar: Lugar, ruta: str) -> str:
     return f"Borrado {ruta} -> papelera: {destino}" if r.ok else f"error: {r.error}"
 
 
-def _q(s: str) -> str:
-    return "'" + s.replace("'", "'\\''") + "'"
+_q = T.comillas  # comilla POSIX: origen único en transporte.comillas
 
 
 def vaciar_papelera(lugar: Lugar) -> str:

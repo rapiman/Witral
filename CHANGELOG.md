@@ -50,6 +50,21 @@ cargar y la verificación en vivo.
   backups más nuevos de cada archivo y se podan los de más de 30 días (local y
   remoto).
 
+**Mantenimiento / limpieza**
+- Comillas de shell POSIX unificadas en `transporte.comillas` (origen único): se
+  eliminaron 5 copias idénticas de `_q`/`_quote` en archivos/basedatos/sistema/
+  trabajos/transporte (ahora aliasan `_q = T.comillas`).
+- `buscar_nombre`/`buscar_contenido` ya no recorren `.venv`, `__pycache__`,
+  `.mypy_cache`, `.pytest_cache`, `.ruff_cache`, `dist`, `.idea`, `.vscode` (antes
+  la búsqueda se iba a decenas de miles de líneas en el entorno virtual).
+- Removidos imports redundantes de `os`/`tempfile` en `transporte._ejecutar_local`.
+- Eliminado `server/lugares.json` residual (config carga `server/witral/lugares.json`,
+  junto al paquete). Movido a papelera.
+- `references/acciones.md` y `references/flujos.md` actualizados al toolset actual
+  (se quitaron `info`/`gradle_task`/`psql -f`; se agregaron run_async/run_esperar/
+  desplegar/psql por stdin/psql_aplicar origen/git_publicar/contexto de búsqueda);
+  apuntan a `WITRAL_PARA_CLAUDE.md` como referencia canónica.
+
 ### Corregido
 
 - `run_async` en Windows local: el lanzamiento usaba `DETACHED_PROCESS` combinado con

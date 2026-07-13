@@ -232,5 +232,4 @@ def _correr(lugar: Lugar, db: DBConfig, args: list[str],
     return r
 
 
-def _q(s: str) -> str:
-    return "'" + s.replace("'", "'\\''") + "'"
+_q = T.comillas  # comilla POSIX: origen único en transporte.comillas

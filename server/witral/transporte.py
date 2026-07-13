@@ -220,8 +220,7 @@ def _matar_arbol(proc) -> None:
 
 def _ejecutar_local(argv, *, cwd, entrada, timeout, env_extra=None) -> Resultado:
     usar_shell = isinstance(argv, str)
-    import os as _os
-    import tempfile as _tempfile
+    # _os y _tempfile ya están importados a nivel de módulo (arriba).
     env = _os.environ.copy()
     # Nunca esperar credenciales interactivas: mejor fallar al instante con
     # mensaje claro que colgarse en un prompt que nadie va a responder.
@@ -289,7 +288,12 @@ def _ejecutar_local(argv, *, cwd, entrada, timeout, env_extra=None) -> Resultado
 
 
 
-def _quote(s: str) -> str:
+def comillas(s: str) -> str:
+    """
+    Comilla simple segura para una palabra en shell POSIX. ORIGEN ÚNICO: los
+    demás módulos la usan como `T.comillas` (aliaseada localmente como `_q`),
+    para no repetir esta lógica en cada archivo.
+    """
     return "'" + s.replace("'", "'\\''") + "'"
 
 
@@ -316,7 +320,7 @@ def _descartar_cliente(lugar: Lugar) -> None:
 
 def _ejecutar_remoto(lugar, argv, *, cwd, entrada, timeout,
                      env_extra=None) -> Resultado:
-    # _quote y "cd &&" asumen shell POSIX: un Windows remoto por SSH aún no
+    # comillas y "cd &&" asumen shell POSIX: un Windows remoto por SSH aún no
     # está soportado; fallar con mensaje claro en vez de mandar sintaxis rota.
     if getattr(lugar, "es_windows", False):
         raise TransporteError(
@@ -324,14 +328,14 @@ def _ejecutar_remoto(lugar, argv, *, cwd, entrada, timeout,
             f"de Witral hoy asume shell POSIX (quoting y 'cd &&'). No soportado."
         )
     if isinstance(argv, list):
-        linea = " ".join(_quote(a) for a in argv)
+        linea = " ".join(comillas(a) for a in argv)
     else:
         linea = argv
     if env_extra:
-        prefijo = " ".join(f"{k}={_quote(str(v))}" for k, v in env_extra.items())
+        prefijo = " ".join(f"{k}={comillas(str(v))}" for k, v in env_extra.items())
         linea = f"{prefijo} {linea}"
     if cwd:
-        linea = f"cd {_quote(cwd)} && {linea}"
+        linea = f"cd {comillas(cwd)} && {linea}"
     import socket as _socket
 
     # Hasta 2 intentos, pero SOLO reintenta si el canal no llegó a abrirse (el

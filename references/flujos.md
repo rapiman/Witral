@@ -1,63 +1,83 @@
 # Flujos
 
 Recetas compuestas para los casos reales. No son tools: son secuencias de acciones
-atómicas (ver `references/acciones.md`) que se arman en el momento, paso a paso, mostrando
-cada uno. Adaptar al caso; no ejecutar a ciegas. Confirmar los pasos que cruzan a un
-server, y reforzar la confirmación en `prod`.
+atómicas (ver `references/acciones.md`) que se arman en el momento, paso a paso,
+mostrando cada uno. Adaptar al caso; no ejecutar a ciegas. Confirmar los pasos que
+cruzan a un server, y reforzar la confirmación en lugares sensibles.
 
 ## Promover una migración de base de datos
 
-Objetivo: un cambio de esquema/datos hecho en local llega y se aplica en dev y prod.
+Objetivo: un cambio de esquema/datos hecho en local llega y se aplica en un server.
 
-1. **Local** — crear/editar el `.sql` de migración (`escribir` / `editar_*`, `donde=local`).
-2. **Mover a dev** — por la vía que corresponda:
-   - Git: `commit` + `push` en local, luego `pull` en dev (`git`, `donde=dev`).
-   - O directo: `copiar(local, dev)` del `.sql`.
-3. **Aplicar en dev** — `psql(donde=dev, "psql -f <ruta>/migracion.sql")`. La base es
-   local para dev; no se expone puerto. Mostrar qué se aplica y dónde.
-4. **Verificar en dev** — `psql(donde=dev, "\dt")` o un `SELECT` de control.
-5. **Promover a prod** — repetir 2–4 con `donde=prod`. **Confirmación reforzada** antes
-   del `psql -f` en prod: mostrar el contenido del `.sql` y el entorno, y esperar el OK
-   explícito del usuario.
+1. **Local** — crear/editar el `.sql` de migración (`escribir` / `editar_*`,
+   `donde=local`).
+2. **Aplicar** — con `psql_aplicar`, que LEE el archivo y lo manda por stdin al psql
+   del lugar de la base (no hace falta copiar el `.sql` primero):
+   - Base local del server: `psql_aplicar(donde="<server>", ruta_sql=..., origen="<server>", confirmado=True)`.
+   - Base detrás de túnel cuyo psql no ve el filesystem local: dejar el `.sql` en
+     local y `psql_aplicar(donde="folil_porafuera", origen="local", ruta_sql=..., confirmado=True)`.
+3. **Verificar** — `psql(donde="<server>", "\dt")` o un `SELECT` de control (lectura
+   libre). Con `base="<otra>"` se apunta a otra base del mismo lugar.
+4. **Repetir** en el siguiente entorno. En lugares **sensibles** (prod): mostrar el
+   contenido del `.sql` y el entorno, y esperar el OK explícito antes de aplicar.
 
 Notas:
-- Si el `.sql` es grande, revisarlo antes con `leer` (con rango) / `buscar_contenido` en
-  vez de cargarlo entero.
-- Nunca aplicar en prod sin haber verificado en dev primero.
+- Si el `.sql` es grande, revisarlo antes con `leer` (con rango) / `buscar_contenido`
+  en vez de cargarlo entero.
+- Multi-sentencia en `psql` muestra todos los result sets. En un bloque mixto
+  (SELECT + UPDATE) en lugar no sensible, `psql` corre las lecturas y pide
+  confirmación solo por las escrituras.
+- Nunca aplicar en un entorno sensible sin haber verificado en uno de prueba primero.
 
-## Promover archivos web (`/var/www/html`)
+## Promover archivos web / desplegar un servicio
 
-Igual al anterior, sin el paso de base.
+Camino corto con `desplegar` (copiar → restart → esperar → curl de humo en una
+llamada):
 
-1. **Local** — editar los archivos web (`editar_*` / `escribir`, `donde=local`).
-2. **Mover** — `copiar(local, dev)` a la ruta web del lugar, **o** `pull` en dev si el
-   sitio se sirve desde un repo.
-3. **Verificar** — `ping(donde=dev)` al servicio, o `leer`/`http_request` para comprobar
-   que el archivo quedó y responde.
-4. **Promover a prod** — repetir con `donde=prod`. Copiar *hacia* prod pide confirmación
-   mostrando qué archivos y a qué ruta.
+- `desplegar(origen="local:folil/web/app.py", destino="folil:/srv/app/app.py", servicio="<servicio>", prueba_url="http://127.0.0.1:8000/health", confirmado=True)`
 
-## Leer o extraer de un `.sql` grande
+El servicio y la prueba de humo corren en el lugar de destino (la `prueba_url` puede
+apuntar a localhost del server, porque el curl sale desde ahí). Si un paso falla,
+`desplegar` corta y lo reporta.
 
-Sin tool dedicada: combinar acciones de archivo.
+A mano, si se quiere granularidad:
+1. **Editar** los archivos (`editar_*` / `escribir`, `donde=local`).
+2. **Copiar** — `copiar(origen="local:...", destino="<server>:...", confirmado=…)`.
+3. **Reiniciar** — `servicio("restart", "<servicio>", donde="<server>", confirmado=True)`.
+4. **Verificar** — `http_request(url, donde="<server>")` o `leer` de un log.
 
-1. `buscar_contenido(archivo, "<marca de inicio del bloque>", donde)` → número de línea.
-2. `leer(archivo, donde, desde, hasta)` para revisar ese tramo (avanzar por tramos
-   si hace falta, sin cargar el archivo entero).
-3. Para extraer a un archivo nuevo: `leer` el bloque (con rango) y `escribir`/`anexar` al
-   destino, por tramos si es muy grande.
+## Leer o extraer de un `.sql` (o log) grande
 
-Esto cubre el caso de sacar bloques (p. ej. una base concreta) de un volcado `.sql`
-enorme, en local o en un server.
+Sin tool dedicada: combinar acciones de archivo, sin cargar el archivo entero.
+
+1. `buscar_contenido(archivo, "<marca de inicio>", antes=0, despues=3, donde)` → línea
+   y contexto.
+2. `leer(archivo, desde, hasta, donde)` para revisar ese tramo (avanzar por tramos).
+   Para el final de un log: `leer(archivo, cola=N)`.
+3. Para extraer a un archivo nuevo: `leer` el bloque y `escribir`/`anexar` al destino,
+   por tramos si es muy grande.
+
+## Trabajos largos (escaneos, builds, migraciones de minutos)
+
+`run` no sirve: el cliente MCP corta las llamadas largas. Usar el buzón asíncrono:
+
+1. `run_async(comando, donde, confirmado=True)` → devuelve un id al instante.
+2. `run_esperar(id, donde)` — bloquea hasta que termine y devuelve el estado. Se topa
+   en ~40s por llamada; si sigue corriendo, vuelve a llamarlo. (O `run_status(id)`
+   para un vistazo puntual.)
+3. `run_matar(id, donde, confirmado=True)` si hay que abortar.
+
+La salida queda en `.witral/jobs/<id>/` del lugar y sobrevive a reinicios: un trabajo
+lanzado en una conversación se puede consultar desde otra.
 
 ## Compilar y desplegar un artefacto (Java/Android)
 
-Compuesto, para cuando aplique:
-
-1. `gradle_task(proyecto, <tarea de build>, donde=local)` — compilar.
-2. `copiar(local, <server>)` — subir el `.jar`/`.apk` resultante.
-3. `ssh`/acción remota para reiniciar el servicio en el server (mostrar el comando).
-4. `ping` / lectura de log en el server — verificar que levantó.
-
-Si este flujo se repite igual muchas veces, recién ahí evaluar fijarlo; por defecto se
-compone en el momento.
+1. **Compilar** — `gradle_build(proyecto, tarea, donde)`. En unix/remoto compila y
+   devuelve la salida. En **local Windows NO compila** (sandbox): el usuario corre
+   `gradlew assembleDebug` en su terminal.
+2. **Instalar en el POS** — `adb_install(serial, apk, donde)`.
+3. **Relanzar y capturar** — `adb_relanzar(serial, paquete, donde)` y
+   `adb_logcat(serial, tags=..., limpiar_antes=True, donde)` (flujo: limpiar →
+   reproducir el caso → capturar).
+4. **Parámetros de QA** — `datastore_get` para inspeccionar y `datastore_set`
+   (confirmado=True, + relanzar) para alternar un parámetro sin UI.

@@ -311,17 +311,17 @@ def editar_literal(archivo: str, viejo: str, nuevo: str, verificar: bool = False
 
 
 @mcp.tool()
-def editar_linea(archivo: str, desde: int, hasta: int = 0, nuevo: str = "",
-                 ancla: str = "", verificar: bool = False,
+def editar_linea(archivo: str, desde: int = 0, hasta: int = 0, nuevo: str = "",
+                 ancla: str = "", verificar: bool = False, linea: int = 0,
                  donde: str = "local") -> str:
     """
     Reemplaza el rango de líneas [desde, hasta] por 'nuevo'. Inmune a CRLF/
     whitespace. Backup automático y devuelve el fragmento resultante para
     verificar en el acto.
 
-    UNA SOLA LÍNEA: omití 'hasta' (o pasá 0) y toma el valor de 'desde' — no
-    hace falta repetir el número. Para vaciar/borrar una línea, dejá 'nuevo'=""
-    (o pasá varias líneas en 'nuevo' con \\n para expandir el rango).
+    UNA SOLA LÍNEA: pasá 'linea=N' (alias cómodo de desde=hasta=N), o bien 'desde'
+    y omitir 'hasta' (toma el valor de 'desde'). Para vaciar/borrar una línea, dejá
+    'nuevo'="" (o pasá varias líneas en 'nuevo' con \\n para expandir el rango).
 
     PARÁMETRO 'ancla' (muy recomendado): si lo pasás con el contenido que
     ESPERÁS que tengan esas líneas, la edición se aplica SOLO si coincide
@@ -336,6 +336,13 @@ def editar_linea(archivo: str, desde: int, hasta: int = 0, nuevo: str = "",
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
+    # 'linea' es el alias cómodo para una sola línea (desde=hasta=linea): evita
+    # el error de schema al llamar con linea=N esperando editar esa línea.
+    if linea > 0:
+        desde = hasta = linea
+    if desde <= 0:
+        return ("Indicá 'linea' (una sola línea) o 'desde'/'hasta' (rango). "
+                "Ej.: linea=33, nuevo=\"...\".")
     if hasta <= 0:
         hasta = desde  # una sola línea: hasta = desde
     try:
@@ -547,6 +554,46 @@ def desplegar(origen: str, destino: str, servicio: str = "",
 
 # --- Ejecución de comandos (run) --------------------------------------------
 
+# Prefijos de comando claramente de SOLO LECTURA. Si TODO el comando se compone
+# de estos (encadenados solo con && o ;, sin redirecciones/pipes/sustitución/
+# background), `run` NO pide confirmación: ahorra una vuelta en vistazos como
+# `git status --porcelain && git log --oneline -3`.
+_RUN_LECTURA = (
+    "git status", "git log", "git diff", "git show", "git branch",
+    "git remote -v", "git remote show", "git rev-parse", "git describe",
+    "git config --get", "git config --list",
+    "ls", "dir", "cat", "type", "findstr", "grep", "rg", "head", "tail",
+    "wc", "echo", "pwd", "cd", "whoami", "hostname", "date", "where", "which",
+    "tree", "stat", "du", "df", "env", "printenv",
+)
+
+
+def _es_solo_lectura(comando: str) -> bool:
+    """
+    True si 'comando' es claramente de solo lectura y seguro de correr sin
+    confirmación: cada segmento (separado por && o ;) arranca con un prefijo de
+    _RUN_LECTURA y no hay redirecciones (`>`/`<`), pipes (`|`), sustitución de
+    comandos (`` ` ``/`$(`) ni background (`&` suelto). Conservador a propósito.
+    """
+    c = comando.strip()
+    if not c or "\n" in c:
+        return False
+    for p in (">", "<", "|", "`", "$(", "${"):
+        if p in c:
+            return False
+    if "&" in c.replace("&&", ""):  # permite '&&', rechaza '&' de fondo
+        return False
+    import re as _re
+    segmentos = [s.strip() for s in _re.split(r"&&|;", c) if s.strip()]
+    if not segmentos:
+        return False
+    for seg in segmentos:
+        low = seg.lower()
+        if not any(low == p or low.startswith(p + " ") for p in _RUN_LECTURA):
+            return False
+    return True
+
+
 @mcp.tool()
 def run(comando: str, donde: str = "local", confirmado: bool = False,
         max_salida: int = 40000) -> str:
@@ -562,7 +609,9 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
-    if not confirmado:
+    # Comando de SOLO LECTURA en un lugar no sensible: no se pide confirmación
+    # (allowlist en _es_solo_lectura). Todo lo demás sigue pidiéndola.
+    if not confirmado and not (_es_solo_lectura(comando) and not lg.sensible):
         extra = " (LUGAR SENSIBLE)" if lg.sensible else ""
         return (
             f"CONFIRMACIÓN REQUERIDA para ejecutar un comando en '{donde}'{extra}.\n"
@@ -1247,7 +1296,11 @@ def gradle_build(proyecto: str, tarea: str = "assembleDebug",
 
 @mcp.tool()
 def buscar_nombre(proyecto: str, patron: str, donde: str = "local") -> str:
-    """Busca por NOMBRE de archivo (regex) en un proyecto."""
+    """
+    Busca por NOMBRE de archivo en un proyecto. El patrón es REGEX (ej. '\\.apk$'),
+    pero si no compila como regex y parece un glob (ej. '*.apk'), se interpreta
+    como glob automáticamente en vez de tirar error.
+    """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
@@ -1260,7 +1313,7 @@ def buscar_nombre(proyecto: str, patron: str, donde: str = "local") -> str:
 @mcp.tool()
 def buscar_contenido(objetivo: str, patron: str, incluir: str = "",
                      antes: int = 0, despues: int = 0,
-                     donde: str = "local") -> str:
+                     max_resultados: int = 200, donde: str = "local") -> str:
     """
     grep de contenido (regex) en un ARCHIVO o una CARPETA/proyecto.
     Si 'objetivo' es un archivo, busca solo en él (reemplaza al viejo
@@ -1271,6 +1324,9 @@ def buscar_contenido(objetivo: str, patron: str, incluir: str = "",
     de grep). Con contexto, las líneas de alrededor salen con '-' (ruta-linea-
     texto) y los grupos se separan con '--' — así el match llega con su entorno
     sin un `leer` posterior. Salida sin contexto: ruta:linea: texto.
+
+    'max_resultados' (por defecto 200): tope de coincidencias; al alcanzarlo corta
+    y avisa, para que una búsqueda amplia no devuelva un muro. 0 = sin tope.
     """
     lg, aviso = _resolver(donde)
     if aviso:
@@ -1278,7 +1334,8 @@ def buscar_contenido(objetivo: str, patron: str, incluir: str = "",
     try:
         return B.buscar_contenido(lg, objetivo, patron,
                                   incluir.split() if incluir else None,
-                                  antes=antes, despues=despues)
+                                  antes=antes, despues=despues,
+                                  max_resultados=max_resultados)
     except RutaFueraDeRaiz as e:
         return f"error: {e}"
 

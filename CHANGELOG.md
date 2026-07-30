@@ -7,6 +7,37 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 5 — feedback de la sesión Kotlin/POS (varias decenas de llamadas)
+
+Implementado y validado (py_compile de cada archivo + tests de lógica pura:
+glob/regex, tope de resultados, allowlist read-only, pista de escape unicode,
+alias `linea`, espejo de rutas de backup). PENDIENTE reinicio para cargar.
+
+**Mejorado**
+- `buscar_contenido`: `max_resultados` (tope 200 por defecto) — al alcanzarlo
+  corta y avisa, en vez de devolver un muro de coincidencias. 0 = sin tope.
+- `buscar_nombre`: si el patrón no compila como regex y parece un glob (`*.apk`,
+  que daba "nothing to repeat"), se interpreta como glob. Si es regex inválida y
+  no parece glob, mensaje claro en vez de traceback.
+- `editar_linea`: parámetro `linea=N` (alias de desde=hasta=N) para editar una
+  sola línea sin el error de schema al pasar `linea`.
+- `run`: allowlist de SOLO LECTURA (git status/log/diff/show/branch, ls, dir,
+  cat, findstr, grep, head, tail, ...) encadenables con `&&`/`;`, sin
+  redirecciones/pipes/background: corre sin confirmación en lugares no sensibles.
+- Backups ESPEJAN la ruta relativa del archivo en `.witral/bak`
+  (`.witral/bak/<ruta>/<nombre>.<ts>.bak`): dos archivos con el mismo nombre en
+  módulos distintos ya no comparten namespace de backup.
+- `adb_install`: encabeza la respuesta con `Dispositivo: <modelo> (serial N)`
+  — el POS puede cambiar de serial entre pruebas y eso explica params ausentes.
+
+**Diagnóstico**
+- Las tools de edición detectan el caso de escape `\uXXXX` desescapado por la
+  capa JSON/MCP (ancla llega con el carácter, el archivo tiene el escape
+  literal) y lo avisan en el error, sugiriendo anclar en ASCII adyacente.
+- Documentada la limitación de verificación real de Kotlin (kotlinc de un solo
+  archivo = falsos positivos sin classpath; gradle local Windows bloqueado por
+  el sandbox) y la mitigación con `buscar_contenido` del símbolo.
+
 ### Ronda 4 — feedback de la sesión de dos días (25 commits / ~40 migraciones)
 
 Fricciones ordenadas por dolor. Implementado y validado (py_compile de cada

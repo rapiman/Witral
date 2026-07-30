@@ -60,6 +60,17 @@ def adb_logcat(lugar: Lugar, serial: str, tags: str = "", nivel: str = "V",
     return r
 
 
+def _adb_modelo(lugar: Lugar, serial: str) -> str | None:
+    """Modelo legible del dispositivo (ro.product.model), o None si no se puede."""
+    try:
+        r = T.ejecutar(lugar, ["adb", "-s", serial, "shell", "getprop",
+                               "ro.product.model"], timeout=15)
+        m = (r.salida or "").strip()
+        return m or None
+    except Exception:
+        return None
+
+
 def adb_install(lugar: Lugar, serial: str, apk: str, reemplazar: bool = True) -> T.Resultado:
     # Normalizar el APK como las tools de archivo: acepta ruta relativa (la
     # resuelve contra la raíz del lugar) o absoluta, y la acota a la raíz. Así
@@ -70,7 +81,13 @@ def adb_install(lugar: Lugar, serial: str, apk: str, reemplazar: bool = True) ->
     if reemplazar:
         args.append("-r")
     args.append(apk_abs)
-    return T.ejecutar(lugar, args, timeout=300)
+    r = T.ejecutar(lugar, args, timeout=300)
+    # Encabezar con modelo + serial: entre pruebas el POS puede cambiar de serial
+    # y eso explica params/estado inesperados; que la respuesta lo deje claro.
+    modelo = _adb_modelo(lugar, serial)
+    quien = f"{modelo} (serial {serial})" if modelo else f"serial {serial}"
+    return T.Resultado(r.codigo, f"Dispositivo: {quien}\n{r.salida or ''}".rstrip(),
+                       r.error)
 
 
 def adb_forcestop(lugar: Lugar, serial: str, paquete: str) -> T.Resultado:

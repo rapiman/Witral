@@ -155,20 +155,22 @@ def _glob_seguro(nombre: str) -> str:
     return _glob.escape(nombre)
 
 
-def _rotar_backups_local(bakdir: Path, nombre_base: str) -> None:
-    """Poda backups viejos: por antigüedad (global) y por cantidad (por archivo).
-    Best-effort: cualquier error al podar se ignora, nunca frena una edición."""
+def _rotar_backups_local(bakdir: Path, sub_dir: Path, nombre_base: str) -> None:
+    """Poda backups viejos: por antigüedad (recursivo, todo el árbol de bak) y
+    por cantidad (por archivo, en su subcarpeta espejada). Best-effort: cualquier
+    error al podar se ignora, nunca frena una edición."""
     try:
         limite = time.time() - _DIAS_BAK * 86400
-        for f in bakdir.glob("*.bak"):
+        for f in bakdir.rglob("*.bak"):
             try:
                 if f.stat().st_mtime < limite:
                     f.unlink()
             except Exception:
                 pass
         # El ts del nombre es %Y%m%d-%H%M%S => orden lexicográfico = cronológico.
-        propios = sorted(bakdir.glob(_glob_seguro(nombre_base) + ".*.bak"))
-        for f in propios[:-_MAX_BAK_POR_ARCHIVO] if len(propios) > _MAX_BAK_POR_ARCHIVO else []:
+        propios = sorted(sub_dir.glob(_glob_seguro(nombre_base) + ".*.bak"))
+        for f in (propios[:-_MAX_BAK_POR_ARCHIVO]
+                  if len(propios) > _MAX_BAK_POR_ARCHIVO else []):
             try:
                 f.unlink()
             except Exception:
@@ -177,10 +179,11 @@ def _rotar_backups_local(bakdir: Path, nombre_base: str) -> None:
         pass
 
 
-def _rotar_backups_remoto(lugar: Lugar, bakdir: str, nombre_base: str) -> None:
-    """Poda remota best-effort: deja los N backups más nuevos de este archivo."""
+def _rotar_backups_remoto(lugar: Lugar, sub_dir: str, nombre_base: str) -> None:
+    """Poda remota best-effort: deja los N backups más nuevos de este archivo en
+    su subcarpeta espejada."""
     try:
-        patron = f"{bakdir}/{nombre_base}.*.bak"
+        patron = f"{sub_dir}/{nombre_base}.*.bak"
         # ls -1t = más nuevo primero; del (_MAX+1)-ésimo en adelante se borran.
         cmd = (f"ls -1t {patron} 2>/dev/null | tail -n +{_MAX_BAK_POR_ARCHIVO + 1} "
                f"| tr '\\n' '\\0' | xargs -0 -r rm -f")
@@ -189,25 +192,43 @@ def _rotar_backups_remoto(lugar: Lugar, bakdir: str, nombre_base: str) -> None:
         pass
 
 
+def _ruta_espejo_remota(ruta: str) -> str:
+    """Ruta relativa saneada (sin leading '/', sin '..') para espejar en bak."""
+    partes = [seg for seg in ruta.replace("\\", "/").split("/")
+              if seg not in ("", ".", "..")]
+    return "/".join(partes) if partes else "archivo"
+
+
 def _backup(lugar: Lugar, ruta: str, data: bytes) -> str:
     ts = time.strftime("%Y%m%d-%H%M%S")
     if lugar.es_local:
         p = normalizar(lugar.raiz, ruta)
         bakdir = Path(lugar.raiz) / ".witral" / "bak"
-        bakdir.mkdir(parents=True, exist_ok=True)
-        destino = bakdir / f"{p.name}.{ts}.bak"
+        # ESPEJAR la ruta relativa dentro de bak: dos archivos con el mismo
+        # nombre en módulos distintos (p. ej. dos SerialMessageParser.kt) ya no
+        # comparten namespace de backup; restaurar el correcto es directo.
+        try:
+            rel = p.resolve().relative_to(Path(lugar.raiz).resolve())
+        except Exception:
+            rel = Path(p.name)
+        sub_dir = bakdir / rel.parent
+        sub_dir.mkdir(parents=True, exist_ok=True)
+        destino = sub_dir / f"{p.name}.{ts}.bak"
         destino.write_bytes(data)
-        _rotar_backups_local(bakdir, p.name)
+        _rotar_backups_local(bakdir, sub_dir, p.name)
         return str(destino)
     else:
         # A ~/.witral/bak del lugar (relativo al home remoto, igual que la
         # papelera): NUNCA al lado del archivo, para no ensuciar árboles git.
+        # Espejar la ruta relativa, igual que en local.
         bakdir = ".witral/bak"
+        rel = _ruta_espejo_remota(ruta)
+        destino = f"{bakdir}/{rel}.{ts}.bak"
+        sub_dir = destino.rsplit("/", 1)[0]
         nombre = ruta.rstrip("/").split("/")[-1]
-        destino = f"{bakdir}/{nombre}.{ts}.bak"
-        T.ejecutar(lugar, ["mkdir", "-p", bakdir])
+        T.ejecutar(lugar, ["mkdir", "-p", sub_dir])
         T.escribir_remoto(lugar, destino, data)
-        _rotar_backups_remoto(lugar, bakdir, nombre)
+        _rotar_backups_remoto(lugar, sub_dir, nombre)
         return destino
 
 
@@ -278,11 +299,35 @@ def _aplicar_ancladas(texto: str, ediciones: list[EdicionAnclada], eol: str) -> 
                 f"del rango, pero deben coincidir EN ORDEN desde la línea {ed.desde}.\n"
                 f"--- esperado (ancla) ---\n" + "\n".join(esperado) +
                 f"\n--- actual (inicio del rango) ---\n" + "\n".join(actual)
+                + _pista_escape_unicode(ed.ancla, texto)
             )
     # Reusar la mecánica de líneas: convertir a EdicionLinea ya validadas.
     return _aplicar_lineas(
         texto, [EdicionLinea(e.desde, e.hasta, e.nuevo) for e in ediciones], eol
     )
+
+
+def _pista_escape_unicode(buscado: str, texto: str) -> str:
+    """
+    Si 'buscado' tiene un carácter no-ASCII cuya secuencia \\uXXXX literal SÍ
+    está en 'texto', devuelve una pista. Caso típico: el archivo (Kotlin/Java/
+    JSON) tiene el escape literal `\\u00B7` y el ancla llegó con el carácter `·`
+    porque la capa JSON/MCP desescapa los \\uXXXX del input (Witral NO desescapa
+    nada). Si no aplica, cadena vacía.
+    """
+    texto_low = texto.lower()
+    for ch in buscado:
+        if ord(ch) > 0x7F:
+            esc = f"\\u{ord(ch):04x}"
+            if esc in texto_low:
+                return (
+                    f"\n[pista: '{ch}' (U+{ord(ch):04X}) figura en el archivo como "
+                    f"el escape literal '{esc}'. La capa JSON/MCP desescapa los "
+                    f"\\uXXXX del input, así que tu texto llega con el carácter y no "
+                    f"matchea el escape del archivo. Anclá en texto ASCII adyacente, "
+                    f"o editá por número de línea sin incluir el escape.]"
+                )
+    return ""
 
 
 def _aplicar_literal(texto: str, ed: EdicionLiteral) -> str:
@@ -302,7 +347,8 @@ def _aplicar_literal(texto: str, ed: EdicionLiteral) -> str:
                 "presente en el archivo: probablemente esta edición ya se aplicó. "
                 "Verificá con leer_rango antes de reintentar."
             )
-        raise EdicionError("El bloque 'viejo' no aparece en el archivo.")
+        raise EdicionError("El bloque 'viejo' no aparece en el archivo."
+                           + _pista_escape_unicode(ed.viejo, texto))
     if n > 1:
         raise EdicionError(
             f"El bloque 'viejo' aparece {n} veces (ambiguo). Usá edición por línea."

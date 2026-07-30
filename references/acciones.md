@@ -67,9 +67,10 @@ preservación del EOL original.
 - `editar_literal(archivo, viejo, nuevo, verificar, donde)` — reemplaza una
   ocurrencia EXACTA y ÚNICA. Falla si no aparece o aparece más de una vez. Inmune a
   CRLF. Ubica por CONTENIDO.
-- `editar_linea(archivo, desde, hasta, nuevo, ancla, verificar, donde)` — reemplaza
-  el rango `[desde, hasta]`. Ubica por POSICIÓN. Para UNA línea, omitir `hasta`
-  (toma `desde`). El parámetro **`ancla`** (muy recomendado) edita solo si el
+- `editar_linea(archivo, desde, hasta, nuevo, ancla, verificar, linea, donde)` —
+  reemplaza el rango `[desde, hasta]`. Ubica por POSICIÓN. Para UNA línea, pasar
+  `linea=N` (alias de desde=hasta=N) u omitir `hasta`. El parámetro **`ancla`**
+  (muy recomendado) edita solo si el
   contenido esperado coincide; si no, aborta sin tocar el archivo. Devuelve el
   fragmento resultante (±2 líneas). `verificar=True` corre `verificar_sintaxis` en
   el mismo viaje.
@@ -85,12 +86,15 @@ Elegir: texto corto y único a la vista → `editar_literal`. Bloque por rango �
 
 ## Búsqueda
 
-- `buscar_nombre(proyecto, patron, donde)` — por NOMBRE de archivo (regex).
-- `buscar_contenido(objetivo, patron, incluir, antes, despues, donde)` — grep de
-  contenido (regex) en un ARCHIVO o CARPETA. Si es carpeta, recorre recursivo con
-  `incluir` (globs; por defecto `*.kt *.java *.xml *.kts *.gradle`). `antes`/`despues`
-  agregan líneas de CONTEXTO (como -B/-A de grep): el match llega con su entorno sin
-  un `leer` posterior. Excluye `build`/`.gradle`/`.git`/`.witral`/`node_modules`/
+- `buscar_nombre(proyecto, patron, donde)` — por NOMBRE de archivo. Es REGEX
+  (ej. `\.apk$`); si el patrón no compila como regex y parece un glob (`*.apk`),
+  se interpreta como glob automáticamente.
+- `buscar_contenido(objetivo, patron, incluir, antes, despues, max_resultados, donde)`
+  — grep de contenido (regex) en un ARCHIVO o CARPETA. Si es carpeta, recorre
+  recursivo con `incluir` (globs; por defecto `*.kt *.java *.xml *.kts *.gradle`).
+  `antes`/`despues` agregan líneas de CONTEXTO (como -B/-A de grep): el match llega
+  con su entorno sin un `leer` posterior. `max_resultados` (200 por defecto) corta y
+  avisa al alcanzar el tope. Excluye `build`/`.gradle`/`.git`/`.witral`/`node_modules`/
   entornos Python (`.venv`, `__pycache__`, ...). Salida: `ruta:linea: texto`.
 
 ---
@@ -145,8 +149,11 @@ Sobre repos dentro de un lugar; soporta `donde`.
 ## Ejecución y sistema
 
 - `run(comando, donde, confirmado, max_salida)` — comando arbitrario. Escotilla
-  general; **siempre** `confirmado=True`. cwd = raíz del lugar. SOLO para comandos
-  CORTOS (<~45s): el cliente MCP corta las llamadas largas.
+  general; pide `confirmado=True` SALVO que sea claramente de SOLO LECTURA en un
+  lugar no sensible (allowlist: git status/log/diff/show, ls, dir, cat, findstr,
+  grep, head, tail..., encadenables con `&&`/`;`, sin redirecciones/pipes/background).
+  cwd = raíz del lugar. SOLO para comandos CORTOS (<~45s): el cliente MCP corta las
+  llamadas largas.
 - `run_async(comando, donde, confirmado)` — lanza un comando LARGO detached y
   devuelve un id. Estado en `.witral/jobs/<id>/`, sobrevive a reinicios.
 - `run_status(id, donde, lineas)` — corriendo/terminado + código + últimas líneas
@@ -182,7 +189,8 @@ remoto.
 Dos coordenadas: `donde` (qué máquina corre `adb`) y `serial` (qué dispositivo).
 
 - `adb_devices(donde)`, `adb_shell(serial, comando, donde)`,
-  `adb_install(serial, apk, donde)`, `adb_forcestop`, `adb_relanzar`.
+  `adb_install(serial, apk, donde)` (encabeza con modelo + serial del dispositivo),
+  `adb_forcestop`, `adb_relanzar`.
 - `adb_logcat(serial, tags, nivel, lineas, limpiar_antes, donde)` — logcat en modo
   dump (vuelca y sale), con filtro por tag/nivel, tail y opción de limpiar el buffer
   antes (flujo: limpiar → reproducir en el POS → capturar).

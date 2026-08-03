@@ -244,6 +244,16 @@ def _ui_nodos_estable(lugar: Lugar, serial: str):
     return b, (_firma(a) == _firma(b))
 
 
+def _ui_nodos_seguro(lugar: Lugar, serial: str) -> list:
+    """UN solo volcado, tolerante a error (devuelve [] si falla). Rápido: para
+    los poll loops de tap/esperar, donde el reintento del loop ya cubre las
+    transiciones sin pagar el doble volcado de _ui_nodos_estable."""
+    try:
+        return _ui_nodos(lugar, serial)
+    except ValueError:
+        return []
+
+
 def _buscar_nodo(nodos: list, texto: str, parcial: bool = True):
     """Busca un nodo por texto o content-desc. Prioridad: desc exacto, texto
     exacto, desc parcial, texto parcial (en Compose los IDs vienen vacíos: se
@@ -335,7 +345,7 @@ def adb_tap_texto(lugar: Lugar, serial: str, texto: str, timeout: int = 12,
     t0 = _t.time()
     ultimos = []
     while True:
-        nodos, _est = _ui_nodos_estable(lugar, serial)
+        nodos = _ui_nodos_seguro(lugar, serial)
         n = _buscar_nodo(nodos, texto, parcial)
         if n and (n["cx"] or n["cy"]):
             _tap_xy(lugar, serial, n["cx"], n["cy"])
@@ -347,6 +357,39 @@ def adb_tap_texto(lugar: Lugar, serial: str, texto: str, timeout: int = 12,
             vis = ", ".join(f'"{v}"' for v in ultimos[:12]) or "(ninguno con texto)"
             return f'no encontré "{texto}" tras {timeout}s. Textos visibles: {vis}'
         _t.sleep(0.4)
+
+
+def adb_escribir(lugar: Lugar, serial: str, texto: str) -> str:
+    """
+    Teclea una secuencia de dígitos en un teclado numérico en pantalla: ubica los
+    botones UNA sola vez (un volcado) y tapea todos de un saque, sin esperar ni
+    verificar entre teclas. Mucho más rápido que un `tap` por dígito. Cada
+    carácter debe ser un dígito 0-9 presente en el teclado.
+    """
+    digitos = [c for c in texto if c.isdigit()]
+    if not digitos:
+        return f"error: '{texto}' no tiene dígitos para teclear."
+    nodos = _ui_nodos_seguro(lugar, serial)
+    if not nodos:
+        return "error: no pude leer el teclado (volcado vacío o pantalla no lista)."
+    # Mapa dígito -> centro. Preferir "Botón número N" (content-desc, más
+    # estable); si no, un nodo cuyo texto es exactamente ese dígito.
+    mapa: dict = {}
+    for n in nodos:
+        md = re.match(r"boton numero (\d)\b", _norm(n["desc"]))
+        if md and (n["cx"] or n["cy"]):
+            mapa.setdefault(md.group(1), (n["cx"], n["cy"]))
+    for n in nodos:
+        t = n["texto"].strip()
+        if len(t) == 1 and t.isdigit() and (n["cx"] or n["cy"]):
+            mapa.setdefault(t, (n["cx"], n["cy"]))
+    faltan = sorted({d for d in digitos if d not in mapa})
+    if faltan:
+        return (f"error: no encontré en el teclado los dígitos {faltan} "
+                f"(¿es la pantalla correcta?).")
+    cmd = "; ".join(f"input tap {mapa[d][0]} {mapa[d][1]}" for d in digitos)
+    T.ejecutar(lugar, ["adb", "-s", serial, "shell", cmd], timeout=30)
+    return f'OK: tecleado "{"".join(digitos)}" ({len(digitos)} dígitos, 1 volcado)'
 
 
 def adb_esperar(lugar: Lugar, serial: str, texto: str = "", patron_log: str = "",
@@ -366,7 +409,7 @@ def adb_esperar(lugar: Lugar, serial: str, texto: str = "", patron_log: str = ""
         return _esperar_log(lugar, serial, patron_log, timeout, tags)
     t0 = _t.time()
     while True:
-        nodos, _est = _ui_nodos_estable(lugar, serial)
+        nodos = _ui_nodos_seguro(lugar, serial)
         if _buscar_nodo(nodos, texto, True):
             return f'apareció "{texto}" tras {int(_t.time() - t0)}s.'
         if _t.time() - t0 >= timeout:

@@ -1273,6 +1273,20 @@ def adb_tap_texto(serial: str, texto: str, timeout: int = 12,
 
 
 @mcp.tool()
+def adb_escribir(serial: str, texto: str, donde: str = "local") -> str:
+    """
+    Teclea una secuencia de dígitos en un teclado numérico EN PANTALLA de una
+    sola pasada: ubica los botones con UN volcado y tapea todos sin esperar entre
+    teclas. Mucho más rápido que un tap por dígito (ideal para montos). 'texto':
+    los dígitos (ej. "4730"); no-dígitos se ignoran.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return M.adb_escribir(lg, serial, texto)
+
+
+@mcp.tool()
 def adb_esperar(serial: str, texto: str = "", patron_log: str = "",
                 timeout: int = 15, tags: str = "", donde: str = "local") -> str:
     """

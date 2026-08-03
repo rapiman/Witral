@@ -30,7 +30,7 @@ from . import movil as M
 from . import transporte as T
 
 
-_VERBOS_ARG = {"paquete", "tap", "permitir", "esperar", "esperar_log",
+_VERBOS_ARG = {"paquete", "tap", "escribir", "permitir", "esperar", "esperar_log",
                "verificar", "no_debe"}
 _VERBOS_SOLO = {"inicio", "atras", "captura"}
 
@@ -106,6 +106,9 @@ def _paso(lugar, serial, verbo, arg, pkg, permitidos, capturas):
         r = M.adb_tap_texto(lugar, serial, arg, timeout=12, confirmado=conf)
         if r.startswith("BLOQUEADO"):
             r += f" (agregá 'permitir {arg}' antes del tap para habilitarlo)"
+        return r.startswith("OK:"), r
+    if verbo == "escribir":
+        r = M.adb_escribir(lugar, serial, arg)
         return r.startswith("OK:"), r
     if verbo == "esperar":
         to, txt = _arg_timeout(arg, 15)

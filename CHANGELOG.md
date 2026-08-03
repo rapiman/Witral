@@ -49,6 +49,12 @@ negra, matching de nodos— replica patrones ya validados). PENDIENTE reinicio.
   del device: es robusto a que el guión pause entre el disparo y el wait (el
   evento ya logueado no se pierde), y elimina la parte finicky del formato de
   hora. En un guión, `inicio` hizo `logcat -c`, así que no hay falso positivo.
+- Rendimiento (feedback en vivo): `tap` y `esperar` ahora hacen UN solo volcado
+  por intento (antes doble); el reintento del loop ya cubre las transiciones, así
+  que cada paso baja a la mitad. El doble volcado queda solo en `verificar`/
+  `no_debe`. Nuevo verbo/tool `escribir <dígitos>` (`adb_escribir`): teclea una
+  cifra completa ubicando el teclado con UN volcado y tapeando todo de un saque,
+  sin esperar entre teclas — reemplaza N taps por dígito (montos mucho más rápidos).
 
 ### Ronda 6 — automatización de UI del POS
 

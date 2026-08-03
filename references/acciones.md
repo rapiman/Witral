@@ -193,7 +193,12 @@ Dos coordenadas: `donde` (qué máquina corre `adb`) y `serial` (qué dispositiv
   `adb_forcestop`, `adb_relanzar`.
 - `adb_logcat(serial, tags, nivel, lineas, limpiar_antes, donde)` — logcat en modo
   dump (vuelca y sale), con filtro por tag/nivel, tail y opción de limpiar el buffer
-  antes (flujo: limpiar → reproducir en el POS → capturar).
+   antes (flujo: limpiar → reproducir en el POS → capturar).
+- `adb_captura(serial, donde)` — captura la pantalla y devuelve la IMAGEN (PNG) directa,
+  en una llamada (exec-out screencap -p; sin screencap → pull → stage).
+- `adb_ui(serial, solo_clickeables, donde)` — `uiautomator dump` parseado: por elemento con
+  texto/content-desc/clickable, da el CENTRO (x,y) para tapear por texto, la clase y el
+  resource-id. Tras el centro, `adb_shell "input tap x y"`.
 - `datastore_get(serial, paquete, archivo, donde)` — lista las claves (tipo y valor).
   Solo lectura.
 - `datastore_set(serial, paquete, archivo, clave, valor, tipo, donde, confirmado)` —

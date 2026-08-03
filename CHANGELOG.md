@@ -7,6 +7,23 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 6 — automatización de UI del POS
+
+Dos tools nuevas para cerrar el loop de QA en el POS sin tapear por píxel.
+Validado (py_compile + parseo de un dump uiautomator de ejemplo; firma de
+`Image` confirmada contra el venv). PENDIENTE reinicio para cargar.
+
+**Añadido**
+- `adb_captura(serial, donde)` — captura la pantalla y devuelve la IMAGEN (PNG)
+  directamente, en UNA llamada (sin el rodeo screencap → pull → stage). Usa
+  `exec-out screencap -p`; en local a memoria, en remoto por temporal + SFTP.
+  El server la devuelve como contenido de imagen (`FastMCP Image`).
+- `adb_ui(serial, solo_clickeables, donde)` — `uiautomator dump` PARSEADO: por
+  cada elemento con texto / content-desc / clickable, el CENTRO (x,y) para
+  tapear POR TEXTO en vez de por píxel, si es clickeable, su clase y su
+  resource-id. Si un botón se mueve, no se rompe la coordenada; y se pueden
+  planear varios pasos por llamada. Tras el centro, `adb_shell "input tap x y"`.
+
 ### Ronda 5 — feedback de la sesión Kotlin/POS (varias decenas de llamadas)
 
 Implementado y validado (py_compile de cada archivo + tests de lógica pura:

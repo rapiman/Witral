@@ -9,6 +9,7 @@ proyecto.
 from __future__ import annotations
 
 import os
+import re
 
 from .config import Lugar
 from .seguridad import normalizar
@@ -101,6 +102,106 @@ def adb_relanzar(lugar: Lugar, serial: str, paquete: str) -> T.Resultado:
         ["adb", "-s", serial, "shell", "monkey", "-p", paquete,
          "-c", "android.intent.category.LAUNCHER", "1"],
     )
+
+
+# --- Captura de pantalla y árbol de vistas ----------------------------------
+
+def adb_captura(lugar: Lugar, serial: str) -> bytes:
+    """
+    Captura la pantalla del dispositivo y devuelve los BYTES PNG, en UNA pasada
+    (sin el rodeo screencap -> pull -> stage). Usa `exec-out screencap -p`, que
+    entrega el PNG por stdout sin la traducción CRLF de `adb shell`. En local se
+    captura directo a memoria; en remoto se vuelca a un temporal del host y se
+    baja por SFTP (bytes intactos, nunca se decodifican como texto).
+    """
+    import subprocess as _sp
+    if lugar.es_local:
+        try:
+            p = _sp.run(["adb", "-s", serial, "exec-out", "screencap", "-p"],
+                        capture_output=True, timeout=60)
+        except Exception as e:
+            raise ValueError(f"no pude capturar (serial {serial}): {e}")
+        data = p.stdout or b""
+        if p.returncode != 0 or not data:
+            err = (p.stderr or b"").decode("utf-8", "replace").strip()
+            raise ValueError(f"screencap falló (serial {serial}): {err or 'sin salida'}")
+    else:
+        tmp = f"/tmp/witral_cap_{serial}.png"
+        r = T.ejecutar(
+            lugar,
+            f"adb -s {T.comillas(serial)} exec-out screencap -p > {T.comillas(tmp)}",
+            timeout=60)
+        if not r.ok:
+            raise ValueError(f"screencap remoto falló (serial {serial}): "
+                             f"{r.error.strip() or r.salida.strip()}")
+        try:
+            data = T.leer_remoto(lugar, tmp)
+        finally:
+            T.ejecutar(lugar, f"rm -f {T.comillas(tmp)}")
+    if not data.startswith(b"\x89PNG"):
+        raise ValueError("la captura no es un PNG válido (¿exec-out no soportado "
+                         "o pantalla protegida/DRM?).")
+    return data
+
+
+_BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
+
+
+def adb_ui(lugar: Lugar, serial: str, solo_clickeables: bool = False) -> str:
+    """
+    Vuelca el árbol de vistas con `uiautomator dump` y lo PARSEA: por cada nodo
+    con texto / content-desc / clickable, muestra el CENTRO (x,y) —para tapear
+    por texto en vez de por píxel—, si es clickeable, su clase y su resource-id.
+    Con 'solo_clickeables'=True deja solo los tapeables.
+    """
+    r1 = T.ejecutar(lugar, ["adb", "-s", serial, "shell", "uiautomator", "dump"],
+                    timeout=40)
+    salida1 = f"{r1.salida or ''} {r1.error or ''}"
+    m = re.search(r"dumped to:\s*(\S+)", salida1)
+    ruta = m.group(1).strip() if m else "/sdcard/window_dump.xml"
+    if not m and "ERROR" in salida1.upper():
+        return f"error: uiautomator dump falló (serial {serial}): {salida1.strip()}"
+    r2 = T.ejecutar(lugar, ["adb", "-s", serial, "shell", "cat", ruta], timeout=40)
+    xml_txt = r2.salida or ""
+    i = xml_txt.find("<")
+    if i < 0:
+        return (f"error: no obtuve XML del dump (serial {serial}). "
+                f"salida: {xml_txt[:200]} {(r2.error or '')[:200]}")
+    xml_txt = xml_txt[i:]
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(xml_txt)
+    except Exception as e:
+        return f"error al parsear el dump: {e}"
+    filas = []
+    for nodo in root.iter("node"):
+        a = nodo.attrib
+        texto = (a.get("text") or "").strip()
+        desc = (a.get("content-desc") or "").strip()
+        clk = a.get("clickable") == "true"
+        if solo_clickeables and not clk:
+            continue
+        etiqueta = texto or desc
+        if not etiqueta and not clk:
+            continue  # nodo de layout sin nada accionable
+        mb = _BOUNDS_RE.search(a.get("bounds") or "")
+        if mb:
+            x1, y1, x2, y2 = map(int, mb.groups())
+            centro = f"({(x1 + x2) // 2},{(y1 + y2) // 2})"
+        else:
+            centro = "(?,?)"
+        cls = (a.get("class") or "").rsplit(".", 1)[-1]
+        rid = (a.get("resource-id") or "").rsplit("/", 1)[-1]
+        marca = "clk" if clk else "   "
+        et = f'"{etiqueta}"' if etiqueta else "(sin texto)"
+        extra = f" id={rid}" if rid else ""
+        filas.append(f"{centro:>13} {marca}  {et}  [{cls}]{extra}")
+    if not filas:
+        return ("(sin elementos con texto/desc/clickables; ¿pantalla vacía, "
+                "protegida, o hay que encender la pantalla?)")
+    enc = (f"UI de {serial} — {len(filas)} elementos. El centro (x,y) es la coord "
+           f"para 'adb_shell input tap x y':")
+    return enc + "\n" + "\n".join(filas)
 
 
 # --- Gradle -----------------------------------------------------------------

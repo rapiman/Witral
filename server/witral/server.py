@@ -16,7 +16,7 @@ gradle y búsqueda. (El número de tools cambia; verlo con tool_search, no aquí
 
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
 
 from . import config as C
 from . import archivos as A
@@ -1218,6 +1218,39 @@ def adb_logcat(serial: str, tags: str = "", nivel: str = "V", lineas: int = 200,
     if aviso:
         return aviso
     return _fmt(M.adb_logcat(lg, serial, tags, nivel, lineas, limpiar_antes))
+
+
+@mcp.tool()
+def adb_captura(serial: str, donde: str = "local"):
+    """
+    Captura la pantalla del dispositivo y devuelve la IMAGEN directamente (PNG),
+    en UNA sola llamada — sin el rodeo screencap -> pull -> stage. Usa `exec-out
+    screencap -p`. 'serial': dispositivo; 'donde': la máquina que corre adb.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        data = M.adb_captura(lg, serial)
+    except (ValueError, T.TransporteError) as e:
+        return f"error: {e}"
+    return Image(data=data, format="png")
+
+
+@mcp.tool()
+def adb_ui(serial: str, solo_clickeables: bool = False, donde: str = "local") -> str:
+    """
+    Vuelca el árbol de vistas (uiautomator dump) PARSEADO: por cada elemento con
+    texto / content-desc / clickable, muestra el CENTRO (x,y) para tapear POR
+    TEXTO en vez de por píxel, si es clickeable, su clase y su resource-id. Así,
+    si un botón se mueve, no te equivocás de coordenada, y podés decidir varios
+    pasos por llamada. Con 'solo_clickeables'=True filtra a los tapeables. Tras
+    ubicar el centro, tapeás con adb_shell "input tap x y".
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return M.adb_ui(lg, serial, solo_clickeables)
 
 
 @mcp.tool()

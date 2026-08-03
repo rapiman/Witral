@@ -26,6 +26,7 @@ from . import transporte as T
 from . import gitops as G
 from . import red as R
 from . import movil as M
+from . import guion as GU
 from . import sistema as S
 from . import busqueda as B
 from . import sintaxis as SX
@@ -1251,6 +1252,68 @@ def adb_ui(serial: str, solo_clickeables: bool = False, donde: str = "local") ->
     if aviso:
         return aviso
     return M.adb_ui(lg, serial, solo_clickeables)
+
+
+@mcp.tool()
+def adb_tap_texto(serial: str, texto: str, timeout: int = 12,
+                  parcial: bool = True, confirmado: bool = False,
+                  donde: str = "local") -> str:
+    """
+    Busca 'texto' (o content-desc) en pantalla, saca su centro y TAPEA — en una
+    llamada, sin volcado -> leer -> elegir -> tapear. ESPERA a que aparezca
+    (hasta 'timeout' s) en vez de tapear al vacío, y mata el error de coordenada
+    vieja si el botón se movió. 'parcial'=True permite match parcial. Los textos
+    de la lista negra del POS (cierre de turno, anulación, borrar llaves...) se
+    niegan salvo confirmado=True.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return M.adb_tap_texto(lg, serial, texto, timeout, parcial, confirmado)
+
+
+@mcp.tool()
+def adb_esperar(serial: str, texto: str = "", patron_log: str = "",
+                timeout: int = 15, tags: str = "", donde: str = "local") -> str:
+    """
+    Espera una CONDICIÓN en vez de un 'sleep N' adivinado. Con 'texto': hasta que
+    ese texto/desc aparezca en la UI. Con 'patron_log' (regex): hasta que una
+    línea de logcat lo matchee — determinista y barato, ideal para aserciones de
+    tags estables (ej. 'Scan C2C: code=00'). 'tags' filtra por tag (coma-
+    separados). Devuelve una línea. Tope de espera por llamada: 40s.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return M.adb_esperar(lg, serial, texto, patron_log, timeout, tags)
+
+
+@mcp.tool()
+def adb_guion(serial: str, archivo: str, paquete: str = "", desde: int = 1,
+              origen: str = "", donde: str = "local"):
+    """
+    Corre un GUIÓN de UI del lado del dispositivo y devuelve UNA línea si pasó;
+    ante el primer fallo junta captura + textos de pantalla + logcat (barato
+    cuando pasa, caro solo cuando falla). Verbos: inicio (estado conocido:
+    logcat 16M/limpio + force-stop + relanzar), tap, permitir, esperar,
+    esperar_log, verificar, no_debe, atras, captura. 'archivo' es la ruta del
+    guión (en 'origen', por defecto el mismo 'donde'); 'paquete' la app (o la
+    directiva 'paquete <pkg>' dentro del guión). Como el cliente MCP corta las
+    llamadas largas, un guión largo se pausa y devuelve 'seguí con desde=K'.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    org = None
+    if origen and origen != donde:
+        org, aviso = _resolver(origen)
+        if aviso:
+            return aviso
+    res = GU.correr(lg, serial, archivo, origen=org, paquete=paquete, desde=desde)
+    contenido = [res["texto"]]
+    for png in res.get("imagenes", []):
+        contenido.append(Image(data=png, format="png"))
+    return contenido if len(contenido) > 1 else res["texto"]
 
 
 @mcp.tool()

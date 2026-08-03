@@ -81,3 +81,43 @@ lanzado en una conversación se puede consultar desde otra.
    reproducir el caso → capturar).
 4. **Parámetros de QA** — `datastore_get` para inspeccionar y `datastore_set`
    (confirmado=True, + relanzar) para alternar un parámetro sin UI.
+
+
+## Automatizar la UI del POS (tapear por texto, esperar, guiones)
+
+La economía correcta: la decisión ocurre del lado del dispositivo y vuelve un
+veredicto. Optimiza los tokens que cuesta mirar una pantalla para decidir el paso.
+
+**Paso a paso (interactivo):**
+1. `adb_captura(serial)` para ver la pantalla, o `adb_ui(serial)` para el árbol de
+   vistas (centros de tap).
+2. `adb_tap_texto(serial, "Continuar")` — tapea por texto en una llamada; espera a
+   que aparezca y sobrevive a que muevan el botón.
+3. `adb_esperar(serial, texto="Menú Comercio")` o
+   `adb_esperar(serial, patron_log="Scan C2C: code=00", tags="Scan")` — espera una
+   condición en vez de adivinar un `sleep`.
+
+**Guión de humo (correr después de cada build):**
+Un `.txt` con un verbo por línea. Barato cuando pasa (una línea); ante el primer
+fallo devuelve captura + textos de pantalla + logcat. Ejemplo:
+
+```
+paquete    com.transformapp.pos
+inicio                          # estado conocido: logcat 16M/limpio, force-stop + relanzar
+tap        Abrir menú principal
+esperar    Menú Comercio
+tap        Menú Comercio
+verificar  Reportes
+verificar  Cierre de Turno      # verificar que EXISTE no lo tapea
+no_debe    Error
+atras
+```
+
+Correr con `adb_guion(serial, "ruta/humo.txt", paquete="com.transformapp.pos")`.
+Guiones largos se pausan y devuelven `seguí con desde=K`. Un `tap` a un texto de la
+lista negra (cierre de turno, anulación, borrar llaves...) se niega salvo que el
+guión traiga `permitir <texto>` antes.
+
+**Lo que NO se automatiza:** tarjeta y PIN (siempre humano) y el juicio visual
+("¿se ve bien?"); para eso, el verbo `captura` es un check opt-in en los pasos que
+importan, no en cada paso.

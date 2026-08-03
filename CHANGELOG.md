@@ -7,6 +7,36 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 7 — guiones de UI del POS (economía de tokens de decisión)
+
+Reorientación del feedback: la variable a optimizar son los TOKENS que cuesta
+mirar una pantalla para decidir el siguiente paso. La lógica corre del lado del
+dispositivo y devuelve un veredicto. Validado con py_compile (el sandbox estaba
+caído para los tests de lógica pura; la lógica —parser, normalización, lista
+negra, matching de nodos— replica patrones ya validados). PENDIENTE reinicio.
+
+**Añadido**
+- `adb_tap_texto(serial, texto, timeout, parcial, confirmado, donde)` — busca el
+  texto/content-desc, saca el centro y tapea, en UNA llamada. Espera a que
+  aparezca (no tapea al vacío) y sobrevive a que muevan el botón. Lista negra del
+  POS (cierre de turno, anulación, borrar llaves, reversa, devolución): se niega
+  salvo `confirmado=True`.
+- `adb_esperar(serial, texto | patron_log, timeout, tags, donde)` — espera una
+  condición en vez de un `sleep` adivinado. `texto`: aparición en la UI.
+  `patron_log` (regex, filtra por `tags`): línea de logcat, con filtro por hora
+  del device para ver solo lo nuevo — aserción determinista y barata.
+- `adb_guion(serial, archivo, paquete, desde, origen, donde)` + módulo nuevo
+  `guion.py` — corre un guión de UI del lado del dispositivo; devuelve UNA línea
+  si pasó, y captura + textos de pantalla + logcat ante el primer fallo. Verbos:
+  `inicio` (logcat 16M/limpio + force-stop + relanzar), `tap`, `permitir`,
+  `esperar`, `esperar_log`, `verificar`, `no_debe`, `atras`, `captura`.
+  Robustez del feedback: doble volcado contra pantallas en transición, match por
+  texto/desc (IDs vacíos en Compose), estado inicial forzado, lista negra en los
+  tap. Presupuesto de tiempo por llamada con reanudación (`desde=K`), porque el
+  cliente MCP corta las llamadas largas.
+- Refactor: `adb_ui` ahora usa el extractor de nodos común (`_ui_nodos`), que
+  también alimenta tap/esperar/guion.
+
 ### Ronda 6 — automatización de UI del POS
 
 Dos tools nuevas para cerrar el loop de QA en el POS sin tapear por píxel.

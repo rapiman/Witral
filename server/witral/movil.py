@@ -146,62 +146,241 @@ def adb_captura(lugar: Lugar, serial: str) -> bytes:
 
 _BOUNDS_RE = re.compile(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]")
 
+# Textos que en un POS NO se tapean sin pedido explícito (lista negra). Se
+# comparan normalizados (sin acentos, minúsculas, contains). tap_texto y el
+# runner de guiones se niegan salvo confirmación explícita.
+_LISTA_NEGRA = ("cierre de turno", "cierre de lote", "anulacion",
+                "borrar llaves", "reversa", "devolucion")
 
-def adb_ui(lugar: Lugar, serial: str, solo_clickeables: bool = False) -> str:
-    """
-    Vuelca el árbol de vistas con `uiautomator dump` y lo PARSEA: por cada nodo
-    con texto / content-desc / clickable, muestra el CENTRO (x,y) —para tapear
-    por texto en vez de por píxel—, si es clickeable, su clase y su resource-id.
-    Con 'solo_clickeables'=True deja solo los tapeables.
-    """
+
+def _norm(s: str) -> str:
+    """Normaliza para matchear texto de UI: sin acentos, minúsculas, espacios colapsados."""
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return " ".join(s.lower().split())
+
+
+def es_peligroso(texto: str) -> bool:
+    """¿'texto' cae en la lista negra del POS (contains normalizado)?"""
+    n = _norm(texto)
+    return any(bl in n for bl in _LISTA_NEGRA)
+
+
+def _ui_dump_xml(lugar: Lugar, serial: str):
+    """Corre uiautomator dump y devuelve (xml, None) o (None, mensaje_error)."""
     r1 = T.ejecutar(lugar, ["adb", "-s", serial, "shell", "uiautomator", "dump"],
                     timeout=40)
     salida1 = f"{r1.salida or ''} {r1.error or ''}"
     m = re.search(r"dumped to:\s*(\S+)", salida1)
     ruta = m.group(1).strip() if m else "/sdcard/window_dump.xml"
     if not m and "ERROR" in salida1.upper():
-        return f"error: uiautomator dump falló (serial {serial}): {salida1.strip()}"
+        return None, f"uiautomator dump falló: {salida1.strip()}"
     r2 = T.ejecutar(lugar, ["adb", "-s", serial, "shell", "cat", ruta], timeout=40)
     xml_txt = r2.salida or ""
     i = xml_txt.find("<")
     if i < 0:
-        return (f"error: no obtuve XML del dump (serial {serial}). "
-                f"salida: {xml_txt[:200]} {(r2.error or '')[:200]}")
-    xml_txt = xml_txt[i:]
+        return None, f"sin XML: {xml_txt[:150]} {(r2.error or '')[:150]}"
+    return xml_txt[i:], None
+
+
+def _ui_nodos(lugar: Lugar, serial: str) -> list:
+    """Parsea el dump a una lista de nodos (dicts texto/desc/clase/rid/clk/cx/cy)."""
+    xml_txt, err = _ui_dump_xml(lugar, serial)
+    if xml_txt is None:
+        raise ValueError(err)
     import xml.etree.ElementTree as ET
     try:
         root = ET.fromstring(xml_txt)
     except Exception as e:
-        return f"error al parsear el dump: {e}"
-    filas = []
+        raise ValueError(f"no pude parsear el dump: {e}")
+    nodos = []
     for nodo in root.iter("node"):
         a = nodo.attrib
-        texto = (a.get("text") or "").strip()
-        desc = (a.get("content-desc") or "").strip()
-        clk = a.get("clickable") == "true"
-        if solo_clickeables and not clk:
-            continue
-        etiqueta = texto or desc
-        if not etiqueta and not clk:
-            continue  # nodo de layout sin nada accionable
         mb = _BOUNDS_RE.search(a.get("bounds") or "")
         if mb:
             x1, y1, x2, y2 = map(int, mb.groups())
-            centro = f"({(x1 + x2) // 2},{(y1 + y2) // 2})"
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
         else:
-            centro = "(?,?)"
-        cls = (a.get("class") or "").rsplit(".", 1)[-1]
-        rid = (a.get("resource-id") or "").rsplit("/", 1)[-1]
-        marca = "clk" if clk else "   "
+            cx = cy = 0
+        nodos.append({
+            "texto": (a.get("text") or "").strip(),
+            "desc": (a.get("content-desc") or "").strip(),
+            "clase": (a.get("class") or "").rsplit(".", 1)[-1],
+            "rid": (a.get("resource-id") or "").rsplit("/", 1)[-1],
+            "clk": a.get("clickable") == "true",
+            "cx": cx, "cy": cy,
+        })
+    return nodos
+
+
+def _firma(nodos: list) -> tuple:
+    return tuple(sorted((n["texto"], n["desc"], n["cx"], n["cy"]) for n in nodos))
+
+
+def _ui_nodos_estable(lugar: Lugar, serial: str):
+    """Dos volcados con una pausa: un dump agarrado en medio de una transición
+    devuelve la pantalla anterior. Devuelve (nodos_del_2do, estable); 'estable'
+    es True solo si ambos coinciden — el llamador decide si confiar."""
+    import time as _t
+    a = _ui_nodos(lugar, serial)
+    _t.sleep(0.35)
+    b = _ui_nodos(lugar, serial)
+    return b, (_firma(a) == _firma(b))
+
+
+def _buscar_nodo(nodos: list, texto: str, parcial: bool = True):
+    """Busca un nodo por texto o content-desc. Prioridad: desc exacto, texto
+    exacto, desc parcial, texto parcial (en Compose los IDs vienen vacíos: se
+    matchea por texto/desc, y se prefiere desc, que cambia menos)."""
+    objetivo = _norm(texto)
+    if not objetivo:
+        return None
+    for n in nodos:
+        if _norm(n["desc"]) == objetivo:
+            return n
+    for n in nodos:
+        if _norm(n["texto"]) == objetivo:
+            return n
+    if parcial:
+        for n in nodos:
+            if n["desc"] and objetivo in _norm(n["desc"]):
+                return n
+        for n in nodos:
+            if n["texto"] and objetivo in _norm(n["texto"]):
+                return n
+    return None
+
+
+def _tap_xy(lugar: Lugar, serial: str, x: int, y: int):
+    return T.ejecutar(lugar, ["adb", "-s", serial, "shell", "input", "tap",
+                              str(x), str(y)])
+
+
+def _ahora_device(lugar: Lugar, serial: str) -> str:
+    """Hora del dispositivo en formato de logcat ('MM-DD HH:MM:SS.mmm'), para
+    filtrar solo lo NUEVO al esperar en el log."""
+    r = T.ejecutar(lugar, ["adb", "-s", serial, "shell", "date",
+                           "+%m-%d %H:%M:%S.000"], timeout=15)
+    return (r.salida or "").strip()
+
+
+def _tags_filtro(tags: str) -> list:
+    tl = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    if not tl:
+        return []
+    return [f"{t}:V" for t in tl] + ["*:S"]
+
+
+def adb_ui(lugar: Lugar, serial: str, solo_clickeables: bool = False) -> str:
+    """
+    Vuelca el árbol de vistas (uiautomator dump) parseado: por cada nodo con
+    texto / content-desc / clickable, el CENTRO (x,y) para tapear por texto en
+    vez de por píxel, si es clickeable, su clase y su resource-id.
+    """
+    try:
+        nodos = _ui_nodos(lugar, serial)
+    except ValueError as e:
+        return f"error: {e} (serial {serial})"
+    filas = []
+    for n in nodos:
+        if solo_clickeables and not n["clk"]:
+            continue
+        etiqueta = n["texto"] or n["desc"]
+        if not etiqueta and not n["clk"]:
+            continue
+        centro = f"({n['cx']},{n['cy']})" if (n["cx"] or n["cy"]) else "(?,?)"
+        marca = "clk" if n["clk"] else "   "
         et = f'"{etiqueta}"' if etiqueta else "(sin texto)"
-        extra = f" id={rid}" if rid else ""
-        filas.append(f"{centro:>13} {marca}  {et}  [{cls}]{extra}")
+        extra = f" id={n['rid']}" if n["rid"] else ""
+        filas.append(f"{centro:>13} {marca}  {et}  [{n['clase']}]{extra}")
     if not filas:
         return ("(sin elementos con texto/desc/clickables; ¿pantalla vacía, "
                 "protegida, o hay que encender la pantalla?)")
     enc = (f"UI de {serial} — {len(filas)} elementos. El centro (x,y) es la coord "
            f"para 'adb_shell input tap x y':")
     return enc + "\n" + "\n".join(filas)
+
+
+def adb_tap_texto(lugar: Lugar, serial: str, texto: str, timeout: int = 12,
+                  parcial: bool = True, confirmado: bool = False) -> str:
+    """
+    Busca 'texto' (o content-desc) en pantalla, saca su centro y tapea. ESPERA a
+    que aparezca (hasta 'timeout' s, tope 40) en vez de tapear al vacío. Reemplaza
+    el ciclo volcado -> leer -> elegir -> tapear por una llamada, y mata el error
+    de coordenada vieja. Si el texto está en la lista negra del POS, se niega
+    salvo confirmado=True.
+    """
+    if es_peligroso(texto) and not confirmado:
+        return (f"BLOQUEADO: '{texto}' está en la lista negra del POS "
+                f"(cierre/anulación/borrar llaves/reversa/devolución). "
+                f"Si es intencional, reintentá con confirmado=True.")
+    import time as _t
+    timeout = min(max(1, timeout), 40)
+    t0 = _t.time()
+    ultimos = []
+    while True:
+        nodos, _est = _ui_nodos_estable(lugar, serial)
+        n = _buscar_nodo(nodos, texto, parcial)
+        if n and (n["cx"] or n["cy"]):
+            _tap_xy(lugar, serial, n["cx"], n["cy"])
+            et = n["desc"] or n["texto"] or "(sin texto)"
+            return f'OK: tap "{et}" en ({n["cx"]},{n["cy"]}) [{n["clase"]}]'
+        ultimos = [(nn["desc"] or nn["texto"]) for nn in nodos
+                   if (nn["desc"] or nn["texto"])]
+        if _t.time() - t0 >= timeout:
+            vis = ", ".join(f'"{v}"' for v in ultimos[:12]) or "(ninguno con texto)"
+            return f'no encontré "{texto}" tras {timeout}s. Textos visibles: {vis}'
+        _t.sleep(0.4)
+
+
+def adb_esperar(lugar: Lugar, serial: str, texto: str = "", patron_log: str = "",
+                timeout: int = 15, tags: str = "") -> str:
+    """
+    Espera una condición (elimina el 'sleep N' adivinado). Con 'texto': hasta que
+    ese texto/desc aparezca en la UI. Con 'patron_log' (regex): hasta que una
+    línea de logcat lo matchee — determinista, ideal para aserciones tipo
+    'Scan C2C: code=00'. 'tags' filtra el logcat por tag (coma-separados). Tope
+    de espera por llamada: 40s (el cliente MCP corta las largas).
+    """
+    import time as _t
+    if not texto and not patron_log:
+        return "error: indicá 'texto' (esperar en la UI) o 'patron_log' (esperar en logcat)."
+    timeout = min(max(1, timeout), 40)
+    if patron_log:
+        return _esperar_log(lugar, serial, patron_log, timeout, tags)
+    t0 = _t.time()
+    while True:
+        nodos, _est = _ui_nodos_estable(lugar, serial)
+        if _buscar_nodo(nodos, texto, True):
+            return f'apareció "{texto}" tras {int(_t.time() - t0)}s.'
+        if _t.time() - t0 >= timeout:
+            return f'NO apareció "{texto}" tras {timeout}s.'
+        _t.sleep(0.4)
+
+
+def _esperar_log(lugar: Lugar, serial: str, patron: str, timeout: int,
+                 tags: str) -> str:
+    import time as _t
+    try:
+        rx = re.compile(patron)
+    except re.error as e:
+        return f"error: patron_log no es una regex válida ({e})."
+    desde = _ahora_device(lugar, serial)
+    filtro = _tags_filtro(tags)
+    t0 = _t.time()
+    while True:
+        args = ["adb", "-s", serial, "logcat", "-d"]
+        if desde:
+            args += ["-t", desde]
+        args += filtro
+        r = T.ejecutar(lugar, args, timeout=20)
+        for linea in (r.salida or "").splitlines():
+            if rx.search(linea):
+                return f"log OK tras {int(_t.time() - t0)}s: {linea.strip()}"
+        if _t.time() - t0 >= timeout:
+            return f"NO apareció el patrón en logcat tras {timeout}s: /{patron}/"
+        _t.sleep(0.6)
 
 
 # --- Gradle -----------------------------------------------------------------

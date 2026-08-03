@@ -198,7 +198,15 @@ Dos coordenadas: `donde` (qué máquina corre `adb`) y `serial` (qué dispositiv
   en una llamada (exec-out screencap -p; sin screencap → pull → stage).
 - `adb_ui(serial, solo_clickeables, donde)` — `uiautomator dump` parseado: por elemento con
   texto/content-desc/clickable, da el CENTRO (x,y) para tapear por texto, la clase y el
-  resource-id. Tras el centro, `adb_shell "input tap x y"`.
+   resource-id. Tras el centro, `adb_shell "input tap x y"`.
+- `adb_tap_texto(serial, texto, timeout, parcial, confirmado, donde)` — busca texto/desc,
+  saca el centro y tapea, en UNA llamada; espera a que aparezca. Lista negra del POS: se
+  niega salvo `confirmado=True`.
+- `adb_esperar(serial, texto | patron_log, timeout, tags, donde)` — espera una condición
+  (aparición en la UI, o línea de logcat por regex/tags) en vez de un `sleep` adivinado.
+- `adb_guion(serial, archivo, paquete, desde, origen, donde)` — corre un guión de UI del
+  lado del dispositivo (verbos inicio/tap/permitir/esperar/esperar_log/verificar/no_debe/
+  atras/captura); una línea si pasa, captura+textos+logcat si falla. Ver `references/flujos.md`.
 - `datastore_get(serial, paquete, archivo, donde)` — lista las claves (tipo y valor).
   Solo lectura.
 - `datastore_set(serial, paquete, archivo, clave, valor, tipo, donde, confirmado)` —

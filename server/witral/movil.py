@@ -221,11 +221,26 @@ def _firma(nodos: list) -> tuple:
 def _ui_nodos_estable(lugar: Lugar, serial: str):
     """Dos volcados con una pausa: un dump agarrado en medio de una transición
     devuelve la pantalla anterior. Devuelve (nodos_del_2do, estable); 'estable'
-    es True solo si ambos coinciden — el llamador decide si confiar."""
+    es True solo si ambos coinciden — el llamador decide si confiar.
+
+    Tolera el error transitorio de uiautomator ('null root node' mientras la app
+    carga o anima): si un volcado falla, NO propaga la excepción — devuelve
+    ([], False) o el volcado que sí salió, para que el poll de esperar/tap
+    reintente hasta el timeout en vez de crashear la tool."""
     import time as _t
-    a = _ui_nodos(lugar, serial)
+    try:
+        a = _ui_nodos(lugar, serial)
+    except ValueError:
+        a = None
     _t.sleep(0.35)
-    b = _ui_nodos(lugar, serial)
+    try:
+        b = _ui_nodos(lugar, serial)
+    except ValueError:
+        b = None
+    if b is None:
+        return ([], False) if a is None else (a, False)
+    if a is None:
+        return b, False
     return b, (_firma(a) == _firma(b))
 
 

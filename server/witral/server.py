@@ -1309,7 +1309,10 @@ def adb_guion(serial: str, archivo: str, paquete: str = "", desde: int = 1,
         org, aviso = _resolver(origen)
         if aviso:
             return aviso
-    res = GU.correr(lg, serial, archivo, origen=org, paquete=paquete, desde=desde)
+    try:
+        res = GU.correr(lg, serial, archivo, origen=org, paquete=paquete, desde=desde)
+    except Exception as e:
+        return f"error inesperado corriendo el guión: {e}"
     contenido = [res["texto"]]
     for png in res.get("imagenes", []):
         contenido.append(Image(data=png, format="png"))

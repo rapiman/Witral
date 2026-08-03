@@ -36,6 +36,12 @@ negra, matching de nodos— replica patrones ya validados). PENDIENTE reinicio.
   cliente MCP corta las llamadas largas.
 - Refactor: `adb_ui` ahora usa el extractor de nodos común (`_ui_nodos`), que
   también alimenta tap/esperar/guion.
+- Corregido (prueba en vivo): el error transitorio de uiautomator ('null root
+  node' mientras la app carga/anima, típico tras `inicio`) se propagaba como
+  excepción y crasheaba la tool. Ahora `_ui_nodos_estable` lo absorbe y el poll
+  de esperar/tap reintenta hasta el timeout; `verificar`/`no_debe` reintentan
+  ante volcado vacío; y la tool `adb_guion` nunca propaga (devuelve un error
+  limpio).
 
 ### Ronda 6 — automatización de UI del POS
 

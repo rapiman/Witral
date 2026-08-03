@@ -37,6 +37,19 @@ _VERBOS_SOLO = {"inicio", "atras", "captura"}
 _PRESUPUESTO = 38  # segundos por llamada (bajo el corte del cliente MCP ~45s)
 
 
+def _nodos(lugar: Lugar, serial: str, intentos: int = 4) -> list:
+    """Nodos del árbol reintentando ante volcados vacíos/transitorios
+    ('null root node' mientras la app carga/anima): así verificar/no_debe no
+    fallan en falso por un dump que llegó en mal momento."""
+    nodos: list = []
+    for _ in range(intentos):
+        nodos, _est = M._ui_nodos_estable(lugar, serial)
+        if nodos:
+            return nodos
+        time.sleep(0.5)
+    return nodos
+
+
 def parsear(texto: str):
     """(paquete_directiva, [(num, verbo, arg), ...]) o levanta ValueError."""
     paquete = None
@@ -91,11 +104,11 @@ def _paso(lugar, serial, verbo, arg, pkg, permitidos, capturas):
         r = M.adb_esperar(lugar, serial, patron_log=arg, timeout=20)
         return r.startswith("log OK"), r
     if verbo == "verificar":
-        nodos, _ = M._ui_nodos_estable(lugar, serial)
+        nodos = _nodos(lugar, serial)
         hay = M._buscar_nodo(nodos, arg, True) is not None
         return hay, ("presente" if hay else f'FALTA "{arg}"')
     if verbo == "no_debe":
-        nodos, _ = M._ui_nodos_estable(lugar, serial)
+        nodos = _nodos(lugar, serial)
         hay = M._buscar_nodo(nodos, arg, True) is not None
         return (not hay), (f'PRESENTE, no debía "{arg}"' if hay else "ausente, ok")
     if verbo == "atras":

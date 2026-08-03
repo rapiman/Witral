@@ -336,6 +336,9 @@ def adb_tap_texto(lugar: Lugar, serial: str, texto: str, timeout: int = 12,
     de coordenada vieja. Si el texto está en la lista negra del POS, se niega
     salvo confirmado=True.
     """
+    # Si trae '+', es una SECUENCIA sobre la misma pantalla (ej. '10%+Continuar').
+    if "+" in texto:
+        return _ejecutar_cadena(lugar, serial, texto, timeout, confirmado)
     if es_peligroso(texto) and not confirmado:
         return (f"BLOQUEADO: '{texto}' está en la lista negra del POS "
                 f"(cierre/anulación/borrar llaves/reversa/devolución). "
@@ -359,21 +362,14 @@ def adb_tap_texto(lugar: Lugar, serial: str, texto: str, timeout: int = 12,
         _t.sleep(0.4)
 
 
-def adb_escribir(lugar: Lugar, serial: str, texto: str) -> str:
-    """
-    Teclea una secuencia de dígitos en un teclado numérico en pantalla: ubica los
-    botones UNA sola vez (un volcado) y tapea todos de un saque, sin esperar ni
-    verificar entre teclas. Mucho más rápido que un `tap` por dígito. Cada
-    carácter debe ser un dígito 0-9 presente en el teclado.
-    """
-    digitos = [c for c in texto if c.isdigit()]
-    if not digitos:
-        return f"error: '{texto}' no tiene dígitos para teclear."
-    nodos = _ui_nodos_seguro(lugar, serial)
-    if not nodos:
-        return "error: no pude leer el teclado (volcado vacío o pantalla no lista)."
-    # Mapa dígito -> centro. Preferir "Botón número N" (content-desc, más
-    # estable); si no, un nodo cuyo texto es exactamente ese dígito.
+def _es_solo_digitos(s: str) -> bool:
+    s = s.strip()
+    return bool(s) and s.isdigit()
+
+
+def _mapa_digitos(nodos: list) -> dict:
+    """Dígito -> centro del botón. Prefiere 'Botón número N' (content-desc, más
+    estable); si no, un nodo cuyo texto es exactamente ese dígito."""
     mapa: dict = {}
     for n in nodos:
         md = re.match(r"boton numero (\d)\b", _norm(n["desc"]))
@@ -383,13 +379,69 @@ def adb_escribir(lugar: Lugar, serial: str, texto: str) -> str:
         t = n["texto"].strip()
         if len(t) == 1 and t.isdigit() and (n["cx"] or n["cy"]):
             mapa.setdefault(t, (n["cx"], n["cy"]))
-    faltan = sorted({d for d in digitos if d not in mapa})
-    if faltan:
-        return (f"error: no encontré en el teclado los dígitos {faltan} "
-                f"(¿es la pantalla correcta?).")
-    cmd = "; ".join(f"input tap {mapa[d][0]} {mapa[d][1]}" for d in digitos)
-    T.ejecutar(lugar, ["adb", "-s", serial, "shell", cmd], timeout=30)
-    return f'OK: tecleado "{"".join(digitos)}" ({len(digitos)} dígitos, 1 volcado)'
+    return mapa
+
+
+def _ejecutar_cadena(lugar: Lugar, serial: str, arg: str, timeout: int = 12,
+                     confirmado: bool = False) -> str:
+    """
+    Ejecuta una secuencia de acciones separadas por '+' sobre la MISMA pantalla,
+    con UN solo volcado: cada segmento se TECLEA si es solo dígitos, o se TAPEA
+    si es texto. Ej.: '4730+Continuar' (teclea 4730, tapea Continuar);
+    '10%+Continuar' (tapea 10%, tapea Continuar). Todos los targets deben estar
+    en la misma pantalla; para cruzar pantallas, usar pasos separados.
+    """
+    tokens = [t.strip() for t in arg.split("+") if t.strip()]
+    if not tokens:
+        return "error: secuencia vacía."
+    for tk in tokens:  # lista negra: ningún tap peligroso sin confirmar
+        if not _es_solo_digitos(tk) and es_peligroso(tk) and not confirmado:
+            return (f"BLOQUEADO: '{tk}' está en la lista negra del POS. "
+                    f"Reintentá con confirmado=True (no encadenes lo peligroso).")
+    import time as _t
+    timeout = min(max(1, timeout), 40)
+    t0 = _t.time()
+    primero = tokens[0]
+    dig0 = _es_solo_digitos(primero)
+    # Esperar a que el PRIMER target esté presente; luego resolver todos con ese
+    # mismo volcado (los botones no se mueven al teclear/tapear en la pantalla).
+    while True:
+        nodos = _ui_nodos_seguro(lugar, serial)
+        listo = (_mapa_digitos(nodos).get(primero[0]) is not None) if dig0 \
+            else (_buscar_nodo(nodos, primero, True) is not None)
+        if nodos and listo:
+            break
+        if _t.time() - t0 >= timeout:
+            return f'no encontré "{primero}" tras {timeout}s (secuencia no iniciada).'
+        _t.sleep(0.4)
+    mapa = _mapa_digitos(nodos)
+    hechos = []
+    for tk in tokens:
+        if _es_solo_digitos(tk):
+            faltan = sorted({d for d in tk if d not in mapa})
+            if faltan:
+                return f'secuencia: faltan dígitos {faltan} en el teclado (en "{tk}").'
+            cmd = "; ".join(f"input tap {mapa[d][0]} {mapa[d][1]}" for d in tk)
+            T.ejecutar(lugar, ["adb", "-s", serial, "shell", cmd], timeout=30)
+            hechos.append(f'"{tk}"(tecleado)')
+        else:
+            n = _buscar_nodo(nodos, tk, True)
+            if not n or not (n["cx"] or n["cy"]):
+                return f'secuencia: no encontré "{tk}" en la pantalla.'
+            _tap_xy(lugar, serial, n["cx"], n["cy"])
+            hechos.append(f'"{tk}"(tap)')
+    return "OK: " + " + ".join(hechos)
+
+
+def adb_escribir(lugar: Lugar, serial: str, texto: str) -> str:
+    """
+    Teclea/tapea una secuencia sobre la pantalla actual con UN solo volcado.
+    Segmentos separados por '+': cada uno se TECLEA si es solo dígitos, o se
+    TAPEA si es texto. Ej.: 'escribir 4730' (teclea el monto),
+    'escribir 4730+Continuar' (teclea y continúa), 'escribir 10%+Continuar'
+    (tapea 10% y continúa). Mucho más rápido que un tap por dígito/acción.
+    """
+    return _ejecutar_cadena(lugar, serial, texto)
 
 
 def adb_esperar(lugar: Lugar, serial: str, texto: str = "", patron_log: str = "",

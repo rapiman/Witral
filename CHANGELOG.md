@@ -55,6 +55,11 @@ negra, matching de nodos— replica patrones ya validados). PENDIENTE reinicio.
   `no_debe`. Nuevo verbo/tool `escribir <dígitos>` (`adb_escribir`): teclea una
   cifra completa ubicando el teclado con UN volcado y tapeando todo de un saque,
   sin esperar entre teclas — reemplaza N taps por dígito (montos mucho más rápidos).
+- Acciones ENCADENADAS con `+` (feedback en vivo): un segmento por acción sobre
+  la MISMA pantalla, resueltas con UN solo volcado. `escribir 4730+Continuar`
+  (teclea el monto y toca Continuar); `tap 10%+Continuar` (dos taps). Cada
+  segmento se teclea si es solo dígitos, o se tapea si es texto. Colapsa varios
+  pasos/volcados en uno. (No encadenar textos de la lista negra.)
 
 ### Ronda 6 — automatización de UI del POS
 

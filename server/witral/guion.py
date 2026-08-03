@@ -32,7 +32,7 @@ from . import transporte as T
 
 _VERBOS_ARG = {"paquete", "tap", "escribir", "permitir", "esperar", "esperar_log",
                "verificar", "no_debe"}
-_VERBOS_SOLO = {"inicio", "atras", "captura"}
+_VERBOS_SOLO = {"inicio", "atras", "captura", "limpiar_log"}
 
 _PRESUPUESTO = 38  # segundos por llamada (bajo el corte del cliente MCP ~45s)
 
@@ -98,6 +98,13 @@ def _inicio(lugar: Lugar, serial: str, pkg: str):
 def _paso(lugar, serial, verbo, arg, pkg, permitidos, capturas):
     if verbo == "inicio":
         return _inicio(lugar, serial, pkg)
+    if verbo == "limpiar_log":
+        # Estado de log conocido SIN force-stop (rápido): agranda el buffer y lo
+        # limpia, para poder asertar por logcat sin falso positivo de una corrida
+        # anterior. Es lo que hace `inicio` con el log, pero sin el cold-start.
+        T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-G", "16M"])
+        T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-c"])
+        return True, "logcat 16M/limpio"
     if verbo == "permitir":
         permitidos.add(M._norm(arg))
         return True, f"habilitado para tap: '{arg}'"

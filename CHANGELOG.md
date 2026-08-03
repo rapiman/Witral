@@ -60,6 +60,14 @@ negra, matching de nodos— replica patrones ya validados). PENDIENTE reinicio.
   (teclea el monto y toca Continuar); `tap 10%+Continuar` (dos taps). Cada
   segmento se teclea si es solo dígitos, o se tapea si es texto. Colapsa varios
   pasos/volcados en uno. (No encadenar textos de la lista negra.)
+- Más velocidad (feedback "esperar menos"): (a) el volcado usa UN round-trip adb
+  (`uiautomator dump <ruta> && cat <ruta>`) en vez de dos — más rápido en cada
+  paso; (b) los `esperar` intermedios son redundantes: `tap`/`escribir` ya
+  esperan a que su target aparezca, así que se sacan del guión; (c) el resultado
+  se detecta por LOGCAT (`APROBADO` se loguea apenas vuelve la autorización,
+  antes de dibujar el voucher) — poll barato vs. volcar la UI cada 2s; (d) nuevo
+  verbo `limpiar_log` (logcat `-G 16M` + `-c`, rápido, SIN force-stop) para poder
+  asertar por log en el guión rápido sin cold-start.
 
 ### Ronda 6 — automatización de UI del POS
 

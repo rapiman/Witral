@@ -168,20 +168,23 @@ def es_peligroso(texto: str) -> bool:
 
 
 def _ui_dump_xml(lugar: Lugar, serial: str):
-    """Corre uiautomator dump y devuelve (xml, None) o (None, mensaje_error)."""
-    r1 = T.ejecutar(lugar, ["adb", "-s", serial, "shell", "uiautomator", "dump"],
-                    timeout=40)
-    salida1 = f"{r1.salida or ''} {r1.error or ''}"
-    m = re.search(r"dumped to:\s*(\S+)", salida1)
-    ruta = m.group(1).strip() if m else "/sdcard/window_dump.xml"
-    if not m and "ERROR" in salida1.upper():
-        return None, f"uiautomator dump falló: {salida1.strip()}"
-    r2 = T.ejecutar(lugar, ["adb", "-s", serial, "shell", "cat", ruta], timeout=40)
-    xml_txt = r2.salida or ""
-    i = xml_txt.find("<")
+    """Corre uiautomator dump y devuelve (xml, None) o (None, mensaje_error).
+    UN solo round-trip adb: dump a un path fijo y cat encadenados en el device
+    (antes eran dos llamadas). uiautomator imprime 'UI hierchary dumped to: ...'
+    y el cat imprime el XML; el parser salta al primer '<', así que el prefijo no
+    molesta. Si el dump falla (p. ej. 'null root node'), el && corta y queda el
+    mensaje de error (sin '<') para reportarlo."""
+    ruta = "/sdcard/witral_ui.xml"
+    cmd = f"uiautomator dump {ruta} && cat {ruta}"
+    r = T.ejecutar(lugar, ["adb", "-s", serial, "shell", cmd], timeout=40)
+    salida = r.salida or ""
+    i = salida.find("<")
     if i < 0:
-        return None, f"sin XML: {xml_txt[:150]} {(r2.error or '')[:150]}"
-    return xml_txt[i:], None
+        err = f"{salida} {r.error or ''}".strip()
+        if "ERROR" in err.upper():
+            return None, f"uiautomator dump falló: {err[:200]}"
+        return None, f"sin XML: {err[:200]}"
+    return salida[i:], None
 
 
 def _ui_nodos(lugar: Lugar, serial: str) -> list:

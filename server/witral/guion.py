@@ -50,6 +50,16 @@ def _nodos(lugar: Lugar, serial: str, intentos: int = 4) -> list:
     return nodos
 
 
+def _arg_timeout(arg: str, default: int):
+    """Si el arg de esperar/esperar_log empieza con un entero, lo usa como
+    timeout en segundos y devuelve (timeout, resto). Ej.: 'esperar 35 Monto de
+    venta' -> (35, 'Monto de venta'). Sin entero al inicio, usa el default."""
+    partes = arg.split(None, 1)
+    if partes and partes[0].isdigit():
+        return int(partes[0]), (partes[1].strip() if len(partes) > 1 else "")
+    return default, arg
+
+
 def parsear(texto: str):
     """(paquete_directiva, [(num, verbo, arg), ...]) o levanta ValueError."""
     paquete = None
@@ -98,10 +108,12 @@ def _paso(lugar, serial, verbo, arg, pkg, permitidos, capturas):
             r += f" (agregá 'permitir {arg}' antes del tap para habilitarlo)"
         return r.startswith("OK:"), r
     if verbo == "esperar":
-        r = M.adb_esperar(lugar, serial, texto=arg, timeout=15)
+        to, txt = _arg_timeout(arg, 15)
+        r = M.adb_esperar(lugar, serial, texto=txt, timeout=to)
         return r.startswith("apareció"), r
     if verbo == "esperar_log":
-        r = M.adb_esperar(lugar, serial, patron_log=arg, timeout=20)
+        to, pat = _arg_timeout(arg, 20)
+        r = M.adb_esperar(lugar, serial, patron_log=pat, timeout=to)
         return r.startswith("log OK"), r
     if verbo == "verificar":
         nodos = _nodos(lugar, serial)

@@ -381,14 +381,15 @@ def _esperar_log(lugar: Lugar, serial: str, patron: str, timeout: int,
         rx = re.compile(patron)
     except re.error as e:
         return f"error: patron_log no es una regex válida ({e})."
-    desde = _ahora_device(lugar, serial)
     filtro = _tags_filtro(tags)
     t0 = _t.time()
+    # Grep del buffer reciente (-t 2000 líneas), SIN filtro por hora: así es
+    # robusto a que el guión pause entre el disparo y el esperar_log (el evento
+    # ya logueado no se pierde). En un guión el verbo `inicio` hizo `logcat -c`,
+    # así que no hay líneas viejas que den falso positivo. (Antes filtraba por la
+    # hora del device, que se perdía el evento tras una pausa y era finicky.)
     while True:
-        args = ["adb", "-s", serial, "logcat", "-d"]
-        if desde:
-            args += ["-t", desde]
-        args += filtro
+        args = ["adb", "-s", serial, "logcat", "-d", "-t", "2000"] + filtro
         r = T.ejecutar(lugar, args, timeout=20)
         for linea in (r.salida or "").splitlines():
             if rx.search(linea):

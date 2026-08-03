@@ -42,6 +42,13 @@ negra, matching de nodos— replica patrones ya validados). PENDIENTE reinicio.
   de esperar/tap reintenta hasta el timeout; `verificar`/`no_debe` reintentan
   ante volcado vacío; y la tool `adb_guion` nunca propaga (devuelve un error
   limpio).
+- Timeout configurable por paso en el guión: `esperar 35 <texto>` /
+  `esperar_log 40 <regex>` (entero al inicio del arg = timeout en s). Necesario
+  para el cold-start del POS tras `inicio` (>15s) y para esperar el resultado.
+- `esperar_log` ahora grepea el buffer reciente (`-t 2000`) SIN filtro por hora
+  del device: es robusto a que el guión pause entre el disparo y el wait (el
+  evento ya logueado no se pierde), y elimina la parte finicky del formato de
+  hora. En un guión, `inicio` hizo `logcat -c`, así que no hay falso positivo.
 
 ### Ronda 6 — automatización de UI del POS
 

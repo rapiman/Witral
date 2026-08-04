@@ -491,6 +491,14 @@ def adb_esperar(lugar: Lugar, serial: str, texto: str = "", patron_log: str = ""
         _t.sleep(0.2)
 
 
+def _es_eco_adb(linea: str) -> bool:
+    """¿La línea es un eco de adbd (tag ADB_SERVICES/adbd) del comando `adb
+    shell` que se está corriendo? Esas líneas contienen el TEXTO del comando —
+    incluido el patrón buscado — y dan falsos positivos si no se descartan
+    (aprendido en vivo: el logcat -e se matcheaba a sí mismo)."""
+    return ("ADB_SERVICES" in linea) or (" adbd " in linea)
+
+
 def _esperar_log(lugar: Lugar, serial: str, patron: str, timeout: int,
                  tags: str) -> str:
     import time as _t
@@ -507,29 +515,39 @@ def _esperar_log(lugar: Lugar, serial: str, patron: str, timeout: int,
     r = T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-d", "-t", "2000"]
                    + filtro, timeout=20)
     for linea in (r.salida or "").splitlines():
-        if rx.search(linea):
+        if rx.search(linea) and not _es_eco_adb(linea):
             return f"log OK tras {int(_t.time() - t0)}s: {linea.strip()}"
     # 2) Espera BLOQUEANTE del lado del device: `logcat -e <regex> -m 1` sale
     #    en cuanto una línea matchea (latencia ~0, UN round-trip), en vez del
     #    poll de 0.6s que volcaba 2000 líneas por vuelta. El timeout lo pone el
-    #    transporte (código 124 => no apareció). La línea candidata se
-    #    RE-VERIFICA con la regex de Python (los dialectos difieren un pelo).
+    #    transporte (código 124 => no apareció).
+    #    OJO (aprendido en vivo): adbd LOGUEA la línea de comando de cada
+    #    `adb shell`, así que si el patrón viajara EN CLARO, el logcat -e se
+    #    matchearía A SÍ MISMO al instante (falso positivo: el guión dio por
+    #    APROBADA una venta que seguía en el PIN). Por eso el patrón viaja en
+    #    base64 y se decodifica recién en el shell del device, y toda línea de
+    #    adbd (_es_eco_adb) se descarta. La candidata se RE-VERIFICA con la
+    #    regex de Python (los dialectos difieren un pelo).
+    import base64 as _b64
+    b64 = _b64.b64encode(patron.encode("utf-8")).decode("ascii")
+    extra = "".join(f" '{f}'" for f in filtro)
+    cmd = f'logcat -e "$(echo {b64} | base64 -d)" -m 1{extra}'
     restante = max(1, int(timeout - (_t.time() - t0)))
-    r = T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-e", patron,
-                           "-m", "1"] + filtro, timeout=restante)
+    r = T.ejecutar(lugar, ["adb", "-s", serial, "shell", cmd], timeout=restante)
     if r.codigo != 124:
         for linea in (r.salida or "").splitlines():
-            if rx.search(linea):
+            if rx.search(linea) and not _es_eco_adb(linea):
                 return f"log OK tras {int(_t.time() - t0)}s: {linea.strip()}"
-    # 3) Fallback (logcat viejo sin -e/-m, dialecto de regex distinto, o el
-    #    matcheo nativo devolvió otra cosa): poll clásico por lo que quede.
+    # 3) Fallback (logcat viejo sin -e/-m, device sin base64 — ahí el $() da
+    #    vacío y -e "" matchea cualquier línea, que la re-verificación de
+    #    Python rechaza —, dialecto de regex distinto): poll clásico.
     while True:
         if _t.time() - t0 >= timeout:
             return f"NO apareció el patrón en logcat tras {timeout}s: /{patron}/"
         r = T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-d", "-t", "2000"]
                        + filtro, timeout=20)
         for linea in (r.salida or "").splitlines():
-            if rx.search(linea):
+            if rx.search(linea) and not _es_eco_adb(linea):
                 return f"log OK tras {int(_t.time() - t0)}s: {linea.strip()}"
         _t.sleep(0.6)
 

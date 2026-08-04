@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 dependencies = [
     "mcp[cli]",
     "paramiko",
+    "pyserial>=3.5",
 ]
 
 [project.scripts]

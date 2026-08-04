@@ -30,6 +30,7 @@ from . import guion as GU
 from . import sistema as S
 from . import busqueda as B
 from . import sintaxis as SX
+from . import puerto_serial as PS
 from . import trabajos as TR
 from .config import DestinoDesconocido
 from .seguridad import RutaFueraDeRaiz
@@ -1300,6 +1301,51 @@ def adb_esperar(serial: str, texto: str = "", patron_log: str = "",
     if aviso:
         return aviso
     return M.adb_esperar(lg, serial, texto, patron_log, timeout, tags)
+
+
+@mcp.tool()
+def serial_puertos(donde: str = "local") -> str:
+    """
+    Lista los puertos serie visibles con su descripción (COM3, /dev/ttyUSB0…).
+    Solo lectura. Por ahora solo 'local': el puerto es físico de la máquina que
+    corre Witral.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return PS.serial_puertos(lg)
+
+
+@mcp.tool()
+def serial_enviar(puerto: str, texto: str, baud: int = 9600, bits: int = 8,
+                  paridad: str = "N", stop: float = 1, framing: str = "crudo",
+                  ack: bool = True, timeout: int = 30, reintentos: int = 3,
+                  hexa: bool = False, donde: str = "local") -> str:
+    """
+    Envía 'texto' por un puerto serie y espera la respuesta.
+
+    GENÉRICA A PROPÓSITO: el encuadre es un PARÁMETRO, no algo cableado.
+      - framing="crudo": se manda tal cual y se lee lo que vuelva. Sirve para
+        cualquier equipo que hable por serial (balanza, impresora, módem, placa).
+      - framing="stx_etx_crc16arc": encuadre STX+payload+ETX+CRC16. La
+        herramienta CALCULA el CRC al enviar y lo VALIDA al recibir; el que
+        llama nunca ve un CRC. Es el protocolo del POS BCI en modo POS
+        Integrado / Cuna. Se llama 'arc' porque "CRC-16" a secas es ambiguo
+        (ARC, MODBUS, CCITT y XMODEM difieren); este es ARC, poly 0xA001.
+
+    'ack'=True (solo con encuadre) acusa recibo con ACK cuando el CRC da bien y
+    manda NAK cuando da mal. El POS ESPERA ese ACK: sin él reenvía la respuesta
+    y parece que llegara duplicada. También reenvía si el otro lado manda NAK,
+    hasta 'reintentos' veces, y corta si recibe EOT.
+
+    'hexa'=True agrega el volcado hexadecimal de la trama, que es lo primero que
+    se quiere ver cuando algo no contesta. Tope de espera por llamada: 40s.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return PS.serial_enviar(lg, puerto, texto, baud, bits, paridad, stop,
+                            framing, ack, timeout, reintentos, hexa)
 
 
 @mcp.tool()

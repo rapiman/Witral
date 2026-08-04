@@ -350,18 +350,38 @@ def adb_tap_texto(lugar: Lugar, serial: str, texto: str, timeout: int = 12,
     timeout = min(max(1, timeout), 40)
     t0 = _t.time()
     ultimos = []
+    # SEN20260804 El nodo puede estar ANIMANDO: entrada de pantalla tras
+    # relanzar, popup que se despliega, lista que asienta. En un frame
+    # intermedio el volcado ya trae el texto, pero en una coordenada que no es
+    # la final -> el tap pega al vacío y el guión falla sin motivo aparente
+    # (visto el 04-08: el icono del selector de operación dumpeado en x=413
+    # mientras animaba, cuando su lugar definitivo es x=351).
+    # Por eso no se tapea el primer match: se exige que DOS volcados seguidos
+    # den el mismo centro. En pantalla quieta no cuesta un volcado extra — es
+    # el mismo poll de siempre, solo que se tapea en la segunda vuelta.
+    previo = None
     while True:
         nodos = _ui_nodos_seguro(lugar, serial)
         n = _buscar_nodo(nodos, texto, parcial)
+        vencido = _t.time() - t0 >= timeout
         if n and (n["cx"] or n["cy"]):
-            _tap_xy(lugar, serial, n["cx"], n["cy"])
-            et = n["desc"] or n["texto"] or "(sin texto)"
-            return f'OK: tap "{et}" en ({n["cx"]},{n["cy"]}) [{n["clase"]}]'
-        ultimos = [(nn["desc"] or nn["texto"]) for nn in nodos
-                   if (nn["desc"] or nn["texto"])]
-        if _t.time() - t0 >= timeout:
-            vis = ", ".join(f'"{v}"' for v in ultimos[:12]) or "(ninguno con texto)"
-            return f'no encontré "{texto}" tras {timeout}s. Textos visibles: {vis}'
+            actual = (n["cx"], n["cy"])
+            # Al vencer el plazo se tapea igual la última posición conocida
+            # (mejor intento) en vez de fallar: es lo que hacía antes.
+            if previo == actual or vencido:
+                _tap_xy(lugar, serial, n["cx"], n["cy"])
+                et = n["desc"] or n["texto"] or "(sin texto)"
+                aviso = "" if previo == actual else " [sin confirmar: seguía moviéndose]"
+                return (f'OK: tap "{et}" en ({n["cx"]},{n["cy"]}) '
+                        f'[{n["clase"]}]{aviso}')
+            previo = actual
+        else:
+            previo = None
+            ultimos = [(nn["desc"] or nn["texto"]) for nn in nodos
+                       if (nn["desc"] or nn["texto"])]
+            if vencido:
+                vis = ", ".join(f'"{v}"' for v in ultimos[:12]) or "(ninguno con texto)"
+                return f'no encontré "{texto}" tras {timeout}s. Textos visibles: {vis}'
         _t.sleep(0.2)
 
 

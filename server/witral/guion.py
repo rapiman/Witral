@@ -23,6 +23,7 @@ presupuesto de tiempo por llamada; si un guión largo no termina, devuelve
 
 from __future__ import annotations
 
+import re
 import time
 
 from .config import Lugar
@@ -91,10 +92,24 @@ def _inicio(lugar: Lugar, serial: str, pkg: str):
     T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-c"])
     T.ejecutar(lugar, ["adb", "-s", serial, "shell", "am", "force-stop", pkg])
     M.adb_relanzar(lugar, serial, pkg)
-    # Pausa mínima: el `esperar` que sigue en el guión ya pollea la carga de la
-    # app; dormir 1.5s acá era pagar dos veces la misma espera.
-    time.sleep(0.5)
-    return True, f"estado inicial ({pkg}): logcat 16M/limpio, force-stop + relanzar"
+
+    # SEN20260804 se espera el FOCO DE ENTRADA, no un rótulo en pantalla.
+    #
+    # "El texto ya se ve" NO significa "la ventana ya recibe toques". Medido en
+    # un A920Pro: el árbol de vistas se puede volcar a los 2s de relanzar, pero
+    # el foco recién llega a los ~7.4s ("Displayed +7s751ms"). Todo tap antes de
+    # eso se lo traga el sistema EN SILENCIO — `input tap` no falla, la tool
+    # responde OK — y el guión se cae dos o tres pasos después, con un mensaje
+    # que apunta al lugar equivocado. Eso costó varias corridas hasta entenderlo.
+    #
+    # Se hace acá, y no en cada guión, justamente para que ningún guión tenga
+    # que acordarse. Si el evento no aparece, no se aborta: se sigue y que falle
+    # el paso real, que da mejor diagnóstico que un error genérico de arranque.
+    r = M.adb_esperar(lugar, serial,
+                      patron_log=r"Input focus has changed to Window.*" + re.escape(pkg),
+                      timeout=40)
+    detalle = "foco confirmado" if r.startswith("log OK") else f"sin evento de foco ({r})"
+    return True, f"estado inicial ({pkg}): logcat 16M/limpio, force-stop + relanzar, {detalle}"
 
 
 def _paso(lugar, serial, verbo, arg, pkg, permitidos, capturas):

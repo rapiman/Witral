@@ -91,7 +91,9 @@ def _inicio(lugar: Lugar, serial: str, pkg: str):
     T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-c"])
     T.ejecutar(lugar, ["adb", "-s", serial, "shell", "am", "force-stop", pkg])
     M.adb_relanzar(lugar, serial, pkg)
-    time.sleep(1.5)
+    # Pausa mínima: el `esperar` que sigue en el guión ya pollea la carga de la
+    # app; dormir 1.5s acá era pagar dos veces la misma espera.
+    time.sleep(0.5)
     return True, f"estado inicial ({pkg}): logcat 16M/limpio, force-stop + relanzar"
 
 

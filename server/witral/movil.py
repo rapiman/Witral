@@ -362,7 +362,7 @@ def adb_tap_texto(lugar: Lugar, serial: str, texto: str, timeout: int = 12,
         if _t.time() - t0 >= timeout:
             vis = ", ".join(f'"{v}"' for v in ultimos[:12]) or "(ninguno con texto)"
             return f'no encontré "{texto}" tras {timeout}s. Textos visibles: {vis}'
-        _t.sleep(0.4)
+        _t.sleep(0.2)
 
 
 def _es_solo_digitos(s: str) -> bool:
@@ -435,17 +435,23 @@ def _ejecutar_cadena(lugar: Lugar, serial: str, arg: str, timeout: int = 12,
         if _t.time() - t0 >= timeout:
             return (f'secuencia: no encontré "{falta}" en la pantalla tras {timeout}s '
                     f'(no se ejecutó nada).')
-        _t.sleep(0.4)
+        _t.sleep(0.2)
 
+    # UN solo round-trip adb para TODO el plan: los taps de todos los segmentos
+    # encadenados en un shell del device (antes: un viaje por segmento). El
+    # `sleep 0.2` ENTRE segmentos da aire a la UI (habilitar el botón tras el
+    # monto) sin pagar la latencia de un round-trip adb.
     hechos = []
+    partes = []
     for kind, tk, coords in plan:
         if kind == "type":
-            cmd = "; ".join(f"input tap {x} {y}" for (x, y) in coords)
-            T.ejecutar(lugar, ["adb", "-s", serial, "shell", cmd], timeout=30)
+            partes.append("; ".join(f"input tap {x} {y}" for (x, y) in coords))
             hechos.append(f'"{tk}"(tecleado)')
         else:
-            _tap_xy(lugar, serial, coords[0], coords[1])
+            partes.append(f"input tap {coords[0]} {coords[1]}")
             hechos.append(f'"{tk}"(tap)')
+    cmd = "; sleep 0.2; ".join(partes)
+    T.ejecutar(lugar, ["adb", "-s", serial, "shell", cmd], timeout=30)
     return "OK: " + " + ".join(hechos)
 
 
@@ -482,7 +488,7 @@ def adb_esperar(lugar: Lugar, serial: str, texto: str = "", patron_log: str = ""
             return f'apareció "{texto}" tras {int(_t.time() - t0)}s.'
         if _t.time() - t0 >= timeout:
             return f'NO apareció "{texto}" tras {timeout}s.'
-        _t.sleep(0.4)
+        _t.sleep(0.2)
 
 
 def _esperar_log(lugar: Lugar, serial: str, patron: str, timeout: int,
@@ -494,19 +500,37 @@ def _esperar_log(lugar: Lugar, serial: str, patron: str, timeout: int,
         return f"error: patron_log no es una regex válida ({e})."
     filtro = _tags_filtro(tags)
     t0 = _t.time()
-    # Grep del buffer reciente (-t 2000 líneas), SIN filtro por hora: así es
-    # robusto a que el guión pause entre el disparo y el esperar_log (el evento
-    # ya logueado no se pierde). En un guión el verbo `inicio` hizo `logcat -c`,
-    # así que no hay líneas viejas que den falso positivo. (Antes filtraba por la
-    # hora del device, que se perdía el evento tras una pausa y era finicky.)
-    while True:
-        args = ["adb", "-s", serial, "logcat", "-d", "-t", "2000"] + filtro
-        r = T.ejecutar(lugar, args, timeout=20)
+    # 1) Barrido INMEDIATO del buffer reciente (-t 2000, sin filtro por hora):
+    #    si el evento ya está logueado (guión que pausó, disparo previo) se
+    #    detecta al toque y no se pierde. En un guión, `inicio`/`limpiar_log`
+    #    hicieron `logcat -c`, así que no hay líneas viejas de falso positivo.
+    r = T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-d", "-t", "2000"]
+                   + filtro, timeout=20)
+    for linea in (r.salida or "").splitlines():
+        if rx.search(linea):
+            return f"log OK tras {int(_t.time() - t0)}s: {linea.strip()}"
+    # 2) Espera BLOQUEANTE del lado del device: `logcat -e <regex> -m 1` sale
+    #    en cuanto una línea matchea (latencia ~0, UN round-trip), en vez del
+    #    poll de 0.6s que volcaba 2000 líneas por vuelta. El timeout lo pone el
+    #    transporte (código 124 => no apareció). La línea candidata se
+    #    RE-VERIFICA con la regex de Python (los dialectos difieren un pelo).
+    restante = max(1, int(timeout - (_t.time() - t0)))
+    r = T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-e", patron,
+                           "-m", "1"] + filtro, timeout=restante)
+    if r.codigo != 124:
         for linea in (r.salida or "").splitlines():
             if rx.search(linea):
                 return f"log OK tras {int(_t.time() - t0)}s: {linea.strip()}"
+    # 3) Fallback (logcat viejo sin -e/-m, dialecto de regex distinto, o el
+    #    matcheo nativo devolvió otra cosa): poll clásico por lo que quede.
+    while True:
         if _t.time() - t0 >= timeout:
             return f"NO apareció el patrón en logcat tras {timeout}s: /{patron}/"
+        r = T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-d", "-t", "2000"]
+                       + filtro, timeout=20)
+        for linea in (r.salida or "").splitlines():
+            if rx.search(linea):
+                return f"log OK tras {int(_t.time() - t0)}s: {linea.strip()}"
         _t.sleep(0.6)
 
 

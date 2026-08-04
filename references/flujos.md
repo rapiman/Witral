@@ -118,6 +118,27 @@ Guiones largos se pausan y devuelven `seguí con desde=K`. Un `tap` a un texto d
 lista negra (cierre de turno, anulación, borrar llaves...) se niega salvo que el
 guión traiga `permitir <texto>` antes.
 
+**Guión de venta (rápido) y buenas prácticas de velocidad:**
+Un flujo completo (monto → propina → pago) con el resultado asegurado por logcat:
+
+```
+paquete    cl.bci.bcipagos.dev
+limpiar_log                     # logcat -G 16M + -c, rápido (sin el force-stop de inicio)
+escribir   4730+Continuar       # teclea el monto y toca Continuar (misma pantalla, 1 volcado)
+tap        10%+Continuar        # dos taps encadenados
+esperar_log 40  Response Message = APROBADO   # resultado determinista por logcat
+tap        Imprimir copia cliente
+```
+
+- **No pongas `esperar` redundantes:** `tap`/`escribir` ya esperan a que su target
+  aparezca, así que cubren la transición de pantalla sin un `esperar` aparte.
+- **Encadená con `+`** las acciones de una misma pantalla: un volcado en vez de varios.
+- **El resultado por `esperar_log`** (una línea estable de la app, ej. `APROBADO`) es más
+  barato y determinista que esperar el voucher fugaz; requiere `limpiar_log` (o `inicio`)
+  antes, para no matchear una corrida anterior.
+- **`inicio` vs `limpiar_log`:** `inicio` da estado conocido pero paga el cold-start
+  (~30s de force-stop + relanzar); si la app ya está abierta, `limpiar_log` alcanza.
+
 **Lo que NO se automatiza:** tarjeta y PIN (siempre humano) y el juicio visual
 ("¿se ve bien?"); para eso, el verbo `captura` es un check opt-in en los pasos que
 importan, no en cada paso.

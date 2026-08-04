@@ -47,10 +47,12 @@ Witral es un servidor [MCP](https://modelcontextprotocol.io) construido con **Fa
 | `gitops.py` | Operaciones git sobre repos dentro de un lugar. |
 | `copiar.py` | Copia de archivos entre lugares vía SFTP. |
 | `red.py` | `ping`, peticiones HTTP, sockets TCP. |
-| `movil.py` | ADB (dispositivos, shell, install, force-stop, relanzar) y tareas Gradle. |
+| `movil.py` | ADB (dispositivos, shell, install, force-stop, relanzar, logcat, DataStore) y **automatización de UI** de terminales POS: captura de pantalla, árbol de vistas (uiautomator parseado), tap por texto, esperas (UI y logcat), teclear. Tareas Gradle. |
 | `sistema.py` | Procesos y servicios, con sintaxis según el SO del lugar (windows/unix). |
 | `busqueda.py` | Búsqueda por nombre de archivo y por contenido (grep) en un proyecto. |
 | `sintaxis.py` | Verificación de sintaxis en dos capas (universal de balance + nativa por binario). |
+| `trabajos.py` | Trabajos en segundo plano (buzón asíncrono): lanza comandos largos *detached* y los consulta por id, sobreviviendo al corte de las llamadas largas del cliente MCP. |
+| `guion.py` | Runner de guiones de UI para el POS: corre los pasos del lado del dispositivo (tap / escribir / esperar / verificar) y devuelve un veredicto — barato cuando pasa, con diagnóstico cuando falla. |
 
 ### El eje `donde`
 
@@ -69,17 +71,19 @@ En local, los comandos corren por `subprocess`; en remoto, viajan por SSH (`para
 `lugares` — lista los destinos definidos (sin exponer secretos).
 
 **Archivos** (eje `donde`)
-`leer` (rango opcional) · `escribir` · `anexar` · `convertir_eol` · `editar_literal` · `editar_linea` (ancla opcional) · `listar` · `crear_carpeta` · `mover` · `borrar` (a papelera) · `vaciar_papelera`
+`leer` (rango, o `cola=N` para el final) · `escribir` · `subir_b64` (escribe bytes decodificados de base64: puente para binarios/contenido grande) · `anexar` · `convertir_eol` · `editar_literal` · `editar_linea` (ancla opcional; `linea=N` para una sola) · `listar` · `crear_carpeta` · `mover` · `borrar` (a papelera) · `vaciar_papelera`
 
 Dos modos de edición: `editar_literal` (texto exacto y único, inmune a CRLF) y `editar_linea` (por rango; con el parámetro `ancla` **verifica** que el contenido coincida antes de editar y aborta si no calza — la opción segura recomendada). `editar_linea` devuelve el fragmento resultante para verificar en el acto. `convertir_eol` pasa un archivo entre LF y CRLF.
 
 `verificar_sintaxis` — red rápida antes de mover o compilar, en dos capas: **universal** (balance de `()[]{}` y comillas/comentarios sin cerrar, para todos los lenguajes, local y remoto) y **nativa** (chequeo real con `node`/`python`/`perl`/etc. si está instalado, solo local). Reconoce kt, java, c, cpp, js, ts, php, py, sql, html, xml, css, sh, rb, pl y más.
 
 **Entre lugares**
-`copiar` — copia un archivo de un lugar a otro por SFTP.
+`copiar` — copia un archivo de un lugar a otro por SFTP (forma compacta `origen="lugar:ruta"`, `destino="lugar:ruta"`).
+`desplegar` — despliegue en una pasada: copiar → reiniciar servicio → esperar → prueba de humo HTTP.
 
 **Ejecución y sistema** (eje `donde`, según el SO del lugar)
-`run` — comando arbitrario en un lugar (local o remoto); escotilla de propósito general, siempre pide confirmación.
+`run` — comando arbitrario en un lugar (local o remoto); escotilla de propósito general. Pide confirmación salvo comandos de solo lectura (allowlist: `git status/log/diff`, `ls`, `dir`, `findstr`, ...) en lugares no sensibles.
+`run_async` / `run_status` / `run_esperar` / `run_matar` — **buzón asíncrono**: lanza un comando LARGO en segundo plano y devuelve un id al instante (el cliente MCP corta las llamadas de más de ~45s); `run_status` consulta por id, `run_esperar` bloquea del lado del server hasta que termina, `run_matar` termina el árbol de procesos. El estado vive en disco y sobrevive a reinicios.
 `procesos` — lista procesos (`tasklist`/`ps` según SO).
 `matar_proceso` — mata por nombre/patrón (`taskkill`/`pkill`).
 `servicio` — status/start/stop/restart (`sc`/`systemctl`).
@@ -88,19 +92,29 @@ Dos modos de edición: `editar_literal` (texto exacto y único, inmune a CRLF) y
 `psql` — consulta/sentencia sobre la base local de un lugar · `psql_aplicar` — aplica un `.sql` (migraciones).
 
 **Git**
-`git_clone` (clona un repo en un destino acotado a la raiz) · `git_init` · `git_status` · `git_log` · `git_diff` · `git_branch` · `git_show` · `git_pull` · `git_fetch` · `git_add` · `git_commit` · `git_push` · `git_reset_hard` · `git_remote` (lista o agrega) · `git_identidad`
+`git_status` · `git_log` · `git_diff` · `git_branch` · `git_show` · `git_pull` · `git_fetch` · `git_add` · `git_commit` · `git_push` · `git_publicar` (ciclo completo status→add→diff→commit→push en una pasada) · `git_reset_hard` · `git_clone` · `git_init` · `git_remote` (lista o agrega) · `git_identidad`
 
 **Red**
 `ping` · `http_request` · `tcp_socket`
 
 **Android / ADB**
-`adb_devices` · `adb_shell` · `adb_install` · `adb_forcestop` · `adb_relanzar` · `adb_logcat` (dump filtrado por tag) · `datastore_get` (lee prefs DataStore) · `datastore_set` (cambia una pref, ej. operativa REST/RETAIL; backup + force-stop, requiere confirmado)
+`adb_devices` · `adb_shell` · `adb_install` (encabeza con modelo + serial) · `adb_forcestop` · `adb_relanzar` · `adb_logcat` (dump filtrado por tag) · `datastore_get` (lee prefs DataStore) · `datastore_set` (cambia una pref, ej. operativa REST/RETAIL; backup + force-stop, requiere confirmado)
+
+**Automatización de UI (terminales POS)**
+La idea de fondo: que la decisión ocurra **del lado del dispositivo** y a Claude le vuelva un veredicto — no tapear por píxel ni mirar cada pantalla.
+
+`adb_captura` — captura la pantalla y devuelve la IMAGEN (PNG) directa, en una llamada.
+`adb_ui` — vuelca el árbol de vistas (`uiautomator dump`) parseado: por cada elemento con texto / content-desc / clickable, el CENTRO (x,y), la clase y el resource-id.
+`adb_tap_texto` — busca un texto (o content-desc), saca su centro y tapea; **espera** a que aparezca y sobrevive a que muevan el botón. Lista negra del POS (cierre de turno, anulación, borrar llaves...) bajo confirmación.
+`adb_escribir` — teclea una cifra en un teclado en pantalla ubicándolo con UN volcado. Tanto `adb_tap_texto` como `adb_escribir` aceptan **secuencias encadenadas** con `+` sobre la misma pantalla (`4730+Continuar`, `10%+Continuar`): cada segmento se teclea si es dígitos, o se tapea si es texto.
+`adb_esperar` — espera una CONDICIÓN en vez de un `sleep`: que un texto aparezca en la UI, o que una línea de logcat matchee una regex (aserción determinista, ideal para tags estables).
+`adb_guion` — corre un **guión** de UI (un `.txt` con un verbo por línea) del lado del dispositivo y devuelve UNA línea si pasó; ante el primer fallo junta captura + textos de pantalla + logcat. Verbos: `inicio` (estado conocido: logcat 16M/limpio + force-stop + relanzar), `limpiar_log`, `tap`, `escribir`, `permitir`, `esperar`, `esperar_log`, `verificar`, `no_debe`, `atras`, `captura`. Guiones largos se pausan y se retoman con `desde=K`.
 
 **Build**
 `gradle_build` — compila con el `gradlew` del proyecto. En unix/remoto compila y devuelve la salida. En local Windows el build no puede correr dentro del sandbox del cliente MCP (Gradle necesita sockets loopback): devuelve un aviso para compilar en una terminal propia y luego desplegar el APK con `adb_install`.
 
 **Búsqueda**
-`buscar_nombre` (por nombre de archivo) · `buscar_contenido` (grep de contenido).
+`buscar_nombre` (por nombre de archivo; regex, con fallback a glob si el patrón parece `*.apk`) · `buscar_contenido` (grep de contenido; líneas de contexto `antes`/`despues` como -B/-A, y tope `max_resultados`).
 
 ---
 
@@ -226,7 +240,7 @@ En `claude_desktop_config.json`:
 
 - **Transporte stdio y subprocesos.** Como el servidor habla por stdio, los subprocesos locales se lanzan con un `stdin` vacío (un pipe que recibe EOF inmediato, vía `input=""`) para que git no quede esperando un prompt invisible, y con `GIT_TERMINAL_PROMPT=0` por la misma razón. Se usa un pipe vacío y no `DEVNULL` porque la JVM necesita un `stdin` válido para su selector NIO.
 - **El sandbox del cliente y los sockets loopback.** Los procesos que el cliente MCP (p. ej. Claude Desktop) lanza heredan un aislamiento que **bloquea los sockets loopback** (AF_UNIX/`Selector.open()`). Por eso Gradle/Java fallan con *"Unable to establish loopback connection"* cuando witral los ejecuta en local Windows. Se investigaron varias salidas —flags de proceso (`CREATE_BREAKAWAY_FROM_JOB`), capas de shell y, sobre todo, ejecutar el build como **tarea programada de Windows** (`schtasks`)— pero ninguna resultó fiable desde el contexto del MCP: las tareas que se pueden crear quedan en modo "Solo interactivo" y no ejecutan el comando, y las no interactivas (SYSTEM/LOCAL SERVICE) dan *Acceso denegado*. La conclusión práctica: **en local Windows el build se corre en una terminal propia** (`gradlew assembleDebug`), y witral se encarga del resto (desplegar el APK con `adb_install`, etc.). En unix/remoto no hay sandbox y `gradle_build` compila sin problema.
-- **Backups automáticos.** `editar_literal`, `editar_linea` y `convertir_eol` guardan un `.bak` con timestamp antes de tocar el archivo.
+- **Backups automáticos, con rotación.** `editar_literal`, `editar_linea` y `convertir_eol` guardan un `.bak` con timestamp en `.witral/bak/` antes de tocar el archivo, **espejando la ruta relativa** (dos archivos con el mismo nombre en módulos distintos no colisionan). Se conservan los 12 más nuevos por archivo y se podan los de más de 30 días.
 - **Papelera.** `borrar` no elimina: mueve a `.witral/papelera/` con timestamp (recuperable). `vaciar_papelera` sí es definitivo.
 - **Timeouts.** Las operaciones git cortan a los 20s para no dejar la sesión colgada.
 

@@ -201,12 +201,17 @@ Dos coordenadas: `donde` (qué máquina corre `adb`) y `serial` (qué dispositiv
    resource-id. Tras el centro, `adb_shell "input tap x y"`.
 - `adb_tap_texto(serial, texto, timeout, parcial, confirmado, donde)` — busca texto/desc,
   saca el centro y tapea, en UNA llamada; espera a que aparezca. Lista negra del POS: se
-  niega salvo `confirmado=True`.
+  niega salvo `confirmado=True`. Acepta cadenas `+` (ver `adb_escribir`).
+- `adb_escribir(serial, texto, donde)` — teclea una cifra en el teclado en pantalla con UN
+  volcado. Tanto este como `adb_tap_texto` aceptan **secuencias `+`** sobre la misma
+  pantalla (`4730+Continuar`, `10%+Continuar`): cada segmento se teclea si es dígitos, o se
+  tapea si es texto.
 - `adb_esperar(serial, texto | patron_log, timeout, tags, donde)` — espera una condición
   (aparición en la UI, o línea de logcat por regex/tags) en vez de un `sleep` adivinado.
 - `adb_guion(serial, archivo, paquete, desde, origen, donde)` — corre un guión de UI del
-  lado del dispositivo (verbos inicio/tap/permitir/esperar/esperar_log/verificar/no_debe/
-  atras/captura); una línea si pasa, captura+textos+logcat si falla. Ver `references/flujos.md`.
+  lado del dispositivo (verbos inicio/limpiar_log/tap/escribir/permitir/esperar/esperar_log/
+  verificar/no_debe/atras/captura); una línea si pasa, captura+textos+logcat si falla.
+  Guiones largos se pausan y se retoman con `desde=K`. Ver `references/flujos.md`.
 - `datastore_get(serial, paquete, archivo, donde)` — lista las claves (tipo y valor).
   Solo lectura.
 - `datastore_set(serial, paquete, archivo, clave, valor, tipo, donde, confirmado)` —

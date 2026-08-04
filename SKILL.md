@@ -1,6 +1,6 @@
 ---
 name: witral
-description: Suite de desarrollo propia (un MCP) construida sobre el modelo "lugares × acciones": hay lugares definidos en config (local, dev, prod...) y acciones que se aplican a cualquiera de ellos (leer, editar, buscar, correr psql, git, ping, copiar entre lugares, adb, gradle). Usar siempre que se trabaje con archivos de proyecto o web, se apliquen migraciones de base de datos, se promueva un cambio entre máquinas (local→dev→prod), se corra un build, se inspeccione un repo, o se toque cualquier cosa en un servidor remoto. El usuario piensa en términos de "hacé esto, en tal lugar" y "moveme esto de acá para allá": resolver el lugar y ejecutar la acción allí, sin pedir detalles de conexión que ya están en config. Consultar esta skill aunque no se nombre la herramienta — basta con que la tarea sea editar/mover archivos, aplicar una migración, o hacer algo en un server.
+description: Suite de desarrollo propia (un MCP) construida sobre el modelo "lugares × acciones": hay lugares definidos en config (local, dev, prod...) y acciones que se aplican a cualquiera de ellos (leer, editar, buscar, correr psql, git, ping, copiar/desplegar entre lugares, trabajos en segundo plano, adb, gradle, y automatización de UI de terminales POS: captura, árbol de vistas, tap por texto, esperas y guiones). Usar siempre que se trabaje con archivos de proyecto o web, se apliquen migraciones de base de datos, se promueva un cambio entre máquinas (local→dev→prod), se corra un build, se inspeccione un repo, se toque cualquier cosa en un servidor remoto, o se automatice/pruebe un flujo en un terminal Android/POS (tapear por texto, correr un guión de UI, verificar por logcat). El usuario piensa en términos de "hacé esto, en tal lugar" y "moveme esto de acá para allá": resolver el lugar y ejecutar la acción allí, sin pedir detalles de conexión que ya están en config. Consultar esta skill aunque no se nombre la herramienta — basta con que la tarea sea editar/mover archivos, aplicar una migración, hacer algo en un server, o manejar un terminal POS.
 ---
 
 # Witral — modelo "lugares × acciones"
@@ -89,12 +89,33 @@ Reglas adicionales que importan a este flujo:
   En base: `UPDATE`/`DELETE`/`DROP`/`TRUNCATE` o cualquier `.sql` que modifique. La
   lectura es libre; lo que destruye o publica se confirma mostrando la sentencia.
 
+## Automatizar un terminal POS es otra acción sobre un lugar
+
+El `donde` de ADB tiene dos coordenadas: la máquina que corre `adb` (el lugar) y el
+`serial` del dispositivo. Además de instalar/loguear, Witral **maneja la UI del terminal**:
+capturar la pantalla, volcar el árbol de vistas (`uiautomator`), y sobre todo **tapear por
+texto** en vez de por píxel — así un flujo sobrevive a que muevan un botón.
+
+La economía correcta: que la decisión ocurra **del lado del dispositivo** y a Claude le
+vuelva un veredicto, no que mire cada pantalla (eso gasta tokens). Por eso:
+
+- `adb_tap_texto` / `adb_escribir` esperan a que el target aparezca y actúan; aceptan
+  cadenas con `+` en la misma pantalla (`4730+Continuar`).
+- `adb_esperar` espera una condición (un texto en la UI, o una línea de **logcat** por
+  regex — determinista y barato) en vez de un `sleep` adivinado.
+- `adb_guion(archivo)` corre un guión (un `.txt` con un verbo por línea) del lado del
+  dispositivo y devuelve **una línea** si pasó; si falla, junta captura + textos + logcat.
+  Barato cuando pasa, caro solo cuando falla. Los guiones se guardan y se reusan (\"iniciá
+  una venta\" → correr el guión). Lista negra de textos peligrosos (cierre de turno,
+  anulación) bajo confirmación; tarjeta y PIN son siempre interacción humana.
+
 ## Referencias
 
 - `references/acciones.md` — catálogo de acciones (firmas de diseño), el eje `donde`, y
   cómo elegir entre variantes (p. ej. modos de edición, copiar vs git).
 - `references/flujos.md` — recetas compuestas para los casos reales: aplicar una migración
-  en dev y prod, promover archivos web, leer/extraer de un `.sql` grande.
+  en dev y prod, promover archivos web, leer/extraer de un `.sql` grande, trabajos largos,
+  y automatizar la UI del POS (tapear por texto, guiones).
 
 ## Nota de vigencia
 

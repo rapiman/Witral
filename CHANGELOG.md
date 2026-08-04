@@ -7,6 +7,22 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 8 — robustez de guiones (hallado explorando división de cuentas)
+
+- **Cadenas `+` sin ejecución parcial:** `_ejecutar_cadena` ahora valida que
+  TODOS los tokens estén en un mismo volcado ANTES de ejecutar nada (antes
+  tecleaba los primeros y recién ahí fallaba al no encontrar uno — dejó
+  "15001500" tecleando en la pantalla equivocada). Si falta un token al agotar
+  el timeout, no se ejecuta nada.
+- **Waits acotados al presupuesto de la llamada:** un paso `esperar`/`esperar_log`
+  largo cerca del final empujaba más allá del corte del cliente MCP (~45-60s) y el
+  guión se cortaba con timeout en vez de pausar. Ahora cada wait se acota al
+  presupuesto restante; si el presupuesto lo corta antes de su timeout real, el
+  guión **PAUSA** limpio (`desde=K`) y reintenta el mismo paso al reanudar (así una
+  pantalla impaciente sobrevive al gap de reanudación). Nuevo helper `_pausa`.
+- Docstring de `adb_guion` actualizado (faltaban los verbos `limpiar_log` y
+  `escribir`).
+
 ### Ronda 7 — guiones de UI del POS (economía de tokens de decisión)
 
 Reorientación del feedback: la variable a optimizar son los TOKENS que cuesta

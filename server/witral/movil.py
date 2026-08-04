@@ -403,35 +403,48 @@ def _ejecutar_cadena(lugar: Lugar, serial: str, arg: str, timeout: int = 12,
                     f"Reintentá con confirmado=True (no encadenes lo peligroso).")
     import time as _t
     timeout = min(max(1, timeout), 40)
+
+    def _resolver(nodos):
+        """(plan, None) si TODOS los tokens están en el volcado, o
+        (None, token_faltante) si falta alguno. plan = lista de
+        (kind, etiqueta, coords). NO ejecuta nada — solo resuelve coordenadas."""
+        mapa = _mapa_digitos(nodos)
+        plan = []
+        for tk in tokens:
+            if _es_solo_digitos(tk):
+                if any(d not in mapa for d in tk):
+                    return None, tk
+                plan.append(("type", tk, [mapa[d] for d in tk]))
+            else:
+                n = _buscar_nodo(nodos, tk, True)
+                if not n or not (n["cx"] or n["cy"]):
+                    return None, tk
+                plan.append(("tap", tk, (n["cx"], n["cy"])))
+        return plan, None
+
+    # Esperar a que TODOS los tokens estén en UN mismo volcado ANTES de ejecutar
+    # nada: así una cadena nunca se ejecuta a medias sobre la pantalla equivocada
+    # (el bug de "15001500" al no encontrar un token DESPUÉS de haber tecleado).
     t0 = _t.time()
-    primero = tokens[0]
-    dig0 = _es_solo_digitos(primero)
-    # Esperar a que el PRIMER target esté presente; luego resolver todos con ese
-    # mismo volcado (los botones no se mueven al teclear/tapear en la pantalla).
+    plan = falta = None
     while True:
         nodos = _ui_nodos_seguro(lugar, serial)
-        listo = (_mapa_digitos(nodos).get(primero[0]) is not None) if dig0 \
-            else (_buscar_nodo(nodos, primero, True) is not None)
-        if nodos and listo:
+        plan, falta = _resolver(nodos) if nodos else (None, tokens[0])
+        if plan is not None:
             break
         if _t.time() - t0 >= timeout:
-            return f'no encontré "{primero}" tras {timeout}s (secuencia no iniciada).'
+            return (f'secuencia: no encontré "{falta}" en la pantalla tras {timeout}s '
+                    f'(no se ejecutó nada).')
         _t.sleep(0.4)
-    mapa = _mapa_digitos(nodos)
+
     hechos = []
-    for tk in tokens:
-        if _es_solo_digitos(tk):
-            faltan = sorted({d for d in tk if d not in mapa})
-            if faltan:
-                return f'secuencia: faltan dígitos {faltan} en el teclado (en "{tk}").'
-            cmd = "; ".join(f"input tap {mapa[d][0]} {mapa[d][1]}" for d in tk)
+    for kind, tk, coords in plan:
+        if kind == "type":
+            cmd = "; ".join(f"input tap {x} {y}" for (x, y) in coords)
             T.ejecutar(lugar, ["adb", "-s", serial, "shell", cmd], timeout=30)
             hechos.append(f'"{tk}"(tecleado)')
         else:
-            n = _buscar_nodo(nodos, tk, True)
-            if not n or not (n["cx"] or n["cy"]):
-                return f'secuencia: no encontré "{tk}" en la pantalla.'
-            _tap_xy(lugar, serial, n["cx"], n["cy"])
+            _tap_xy(lugar, serial, coords[0], coords[1])
             hechos.append(f'"{tk}"(tap)')
     return "OK: " + " + ".join(hechos)
 

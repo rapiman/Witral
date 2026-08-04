@@ -146,6 +146,17 @@ def _paso(lugar, serial, verbo, arg, pkg, permitidos, capturas):
     return False, f"verbo no implementado: {verbo}"
 
 
+def _pausa(idx: int, total: int, traza: list, capturas: list, nota: str = "") -> dict:
+    """Devuelve el resultado de PAUSA (parcial): el guión no terminó en esta
+    llamada; se retoma con `desde=idx`."""
+    extra = f" ({nota})" if nota else ""
+    cuerpo = (f"EN PROGRESO: {idx - 1}/{total} pasos ok en esta llamada{extra}. "
+              f"El cliente MCP corta las llamadas largas; seguí con "
+              f"adb_guion(..., desde={idx}).\n" + "\n".join(traza[-6:]))
+    return {"ok": True, "parcial": True, "siguiente": idx,
+            "texto": cuerpo, "imagenes": capturas}
+
+
 def correr(lugar: Lugar, serial: str, ruta: str, origen: Lugar | None = None,
            paquete: str = "", desde: int = 1) -> dict:
     """Corre el guión. Devuelve dict {ok, texto, imagenes, [parcial, siguiente]}."""
@@ -171,17 +182,41 @@ def correr(lugar: Lugar, serial: str, ruta: str, origen: Lugar | None = None,
     t0 = time.time()
     while idx <= total:
         num, verbo, arg = pasos[idx - 1]
+
+        # Pasos de espera: acotar su timeout al PRESUPUESTO restante de la llamada
+        # para no pasarse del corte del cliente MCP (~45-60s). Si el presupuesto lo
+        # corta ANTES de su timeout real, se PAUSA (no falla) y se reintenta este
+        # mismo paso al reanudar — así una pantalla impaciente sobrevive al gap.
+        if verbo in ("esperar", "esperar_log"):
+            restante = _PRESUPUESTO - (time.time() - t0)
+            if restante < 2 and idx > 1:
+                return _pausa(idx, total, traza, capturas)
+            default = 15 if verbo == "esperar" else 20
+            to_req, txt = _arg_timeout(arg, default)
+            efectivo = min(to_req, max(2, int(restante)))
+            if verbo == "esperar":
+                r = M.adb_esperar(lugar, serial, texto=txt, timeout=efectivo)
+                ok = r.startswith("apareció")
+            else:
+                r = M.adb_esperar(lugar, serial, patron_log=txt, timeout=efectivo)
+                ok = r.startswith("log OK")
+            traza.append(f"{idx:>2}/{total} {verbo} {arg}  -> {r}")
+            if ok:
+                idx += 1
+                continue
+            if efectivo < to_req:
+                # Cortado por presupuesto (no por su timeout real): pausar.
+                return _pausa(idx, total, traza, capturas,
+                              nota=f"esperando, {efectivo}s sin éxito; sigue")
+            return _fallo(lugar, serial, idx, total, verbo, arg, r, traza, capturas)
+
         ok, msg = _paso(lugar, serial, verbo, arg, pkg, permitidos, capturas)
         traza.append(f"{idx:>2}/{total} {verbo} {arg}  -> {msg}")
         if not ok:
             return _fallo(lugar, serial, idx, total, verbo, arg, msg, traza, capturas)
         idx += 1
         if idx <= total and (time.time() - t0) >= _PRESUPUESTO:
-            cuerpo = (f"EN PROGRESO: {idx - 1}/{total} pasos ok en esta llamada. "
-                      f"El cliente MCP corta las llamadas largas; seguí con "
-                      f"adb_guion(..., desde={idx}).\n" + "\n".join(traza[-6:]))
-            return {"ok": True, "parcial": True, "siguiente": idx,
-                    "texto": cuerpo, "imagenes": capturas}
+            return _pausa(idx, total, traza, capturas)
     return {"ok": True, "texto": f"GUIÓN OK: {total}/{total} pasos verdes "
             f"(serial {serial}).", "imagenes": capturas}
 

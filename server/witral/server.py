@@ -1309,8 +1309,9 @@ def adb_guion(serial: str, archivo: str, paquete: str = "", desde: int = 1,
     Corre un GUIÓN de UI del lado del dispositivo y devuelve UNA línea si pasó;
     ante el primer fallo junta captura + textos de pantalla + logcat (barato
     cuando pasa, caro solo cuando falla). Verbos: inicio (estado conocido:
-    logcat 16M/limpio + force-stop + relanzar), tap, permitir, esperar,
-    esperar_log, verificar, no_debe, atras, captura. 'archivo' es la ruta del
+    logcat 16M/limpio + force-stop + relanzar), limpiar_log (logcat -c sin
+    force-stop), tap, escribir (teclea/tapea; acepta cadenas 'a+b+c'), permitir,
+    esperar, esperar_log, verificar, no_debe, atras, captura. 'archivo' es la ruta del
     guión (en 'origen', por defecto el mismo 'donde'); 'paquete' la app (o la
     directiva 'paquete <pkg>' dentro del guión). Como el cliente MCP corta las
     llamadas largas, un guión largo se pausa y devuelve 'seguí con desde=K'.

@@ -46,6 +46,41 @@ _VERBOS_ARG = {"paquete", "tap", "escribir", "permitir", "esperar", "esperar_log
 # de un patrón (p. ej. 'APROBADO$') no matchea (no lo sigue un identificador);
 # para un '$' literal seguido de letras en un patrón, usar '[$]'.
 _VAR_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
+
+# Aleatorios por corrida (QA con variedad): dos formas.
+# - En 'valores': monto=rnd(10000,30000,500) — se resuelve UNA vez por corrida
+#   y todos los $monto usan ese mismo número (consistencia entre pasos).
+# - Inline en un arg: $rnd(10000,30000,500) o $rnd_opcion(10%,20%,30%) — cada
+#   ocurrencia rueda su propio valor al ejecutarse su paso.
+# Lo elegido queda visible: en la traza (args expandidos) y en la línea final
+# del GUIÓN OK ("Aleatorios: ..."). Si una corrida con rnd se pausa, al
+# reanudar conviene fijar en 'valores' los ya resueltos (salen en la traza).
+_RND_RE = re.compile(r"^rnd\(\s*(-?\d+)\s*,\s*(-?\d+)\s*(?:,\s*(\d+)\s*)?\)$")
+_RND_OP_RE = re.compile(r"^rnd_opcion\((.*)\)$")
+_RND_INLINE_RE = re.compile(r"\$(rnd(?:_opcion)?\([^)]*\))")
+
+
+def _resolver_rnd(expr: str) -> str | None:
+    """Evalúa 'rnd(min,max[,paso])' (entero alineado al paso) o
+    'rnd_opcion(a,b,c)' (una de las opciones; comillas opcionales). Devuelve
+    None si no es una expresión rnd; ValueError si lo es pero está mal."""
+    import random
+    e = expr.strip()
+    m = _RND_RE.match(e)
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        paso = int(m.group(3) or 1)
+        if paso <= 0 or b < a:
+            raise ValueError(f"rnd inválido (pide min<=max y paso>0): {expr}")
+        return str(a + paso * random.randint(0, (b - a) // paso))
+    m = _RND_OP_RE.match(e)
+    if m:
+        ops = [o.strip().strip('"').strip("'") for o in m.group(1).split(",")]
+        ops = [o for o in ops if o]
+        if not ops:
+            raise ValueError(f"rnd_opcion sin opciones: {expr}")
+        return random.choice(ops)
+    return None
 _VERBOS_SOLO = {"inicio", "atras", "captura", "limpiar_log"}
 
 _PRESUPUESTO = 38  # segundos por llamada (bajo el corte del cliente MCP ~45s)
@@ -221,7 +256,24 @@ def correr(lugar: Lugar, serial: str, ruta: str, origen: Lugar | None = None,
                     f"separados por ';')."}
         k, v = par.split("=", 1)
         vals[k.strip()] = v.strip()
-    usadas = {m.group(1) for _, _, a in pasos for m in _VAR_RE.finditer(a)}
+    aleatorios: list = []
+    try:
+        # rnd en 'valores': un valor por corrida, compartido por todos los $var.
+        for k in list(vals):
+            r = _resolver_rnd(vals[k])
+            if r is not None:
+                vals[k] = r
+                aleatorios.append(f"{k}={r}")
+        # rnd inline: validar la sintaxis ANTES de tocar el device.
+        for _, _, a in pasos:
+            for m in _RND_INLINE_RE.finditer(a):
+                _resolver_rnd(m.group(1))
+    except ValueError as e:
+        return {"ok": False, "imagenes": [], "texto": f"guión inválido: {e}"}
+    # Para detectar variables faltantes, primero sacar las expresiones rnd
+    # inline ($rnd no es una variable que haya que pasar en 'valores').
+    sin_rnd = [_RND_INLINE_RE.sub("", a) for _, _, a in pasos]
+    usadas = {m.group(1) for a in sin_rnd for m in _VAR_RE.finditer(a)}
     faltan = sorted(usadas - set(vals))
     if faltan:
         return {"ok": False, "imagenes": [], "texto":
@@ -230,7 +282,14 @@ def correr(lugar: Lugar, serial: str, ruta: str, origen: Lugar | None = None,
                 "No se ejecutó nada."}
 
     def _exp(a: str) -> str:
-        return _VAR_RE.sub(lambda m: vals[m.group(1)], a)
+        # Inline primero (cada ocurrencia rueda su valor y queda registrada),
+        # después las variables con nombre.
+        def _roll(m):
+            v = _resolver_rnd(m.group(1))
+            aleatorios.append(f"{m.group(1)} -> {v}")
+            return v
+        a = _RND_INLINE_RE.sub(_roll, a)
+        return _VAR_RE.sub(lambda mm: vals[mm.group(1)], a)
 
     def _mascarar(msj: str, secreto: str) -> str:
         """Borra el valor del PIN (y sus segmentos de dígitos) de un mensaje
@@ -322,8 +381,9 @@ def correr(lugar: Lugar, serial: str, ruta: str, origen: Lugar | None = None,
         idx += 1
         if idx <= total and (time.time() - t0) >= _PRESUPUESTO:
             return _pausa(idx, total, traza, capturas)
+    extra_rnd = f" Aleatorios: {', '.join(aleatorios)}." if aleatorios else ""
     return {"ok": True, "texto": f"GUIÓN OK: {total}/{total} pasos verdes "
-            f"(serial {serial}).", "imagenes": capturas}
+            f"(serial {serial}).{extra_rnd}", "imagenes": capturas}
 
 
 def _fallo(lugar, serial, idx, total, verbo, arg, msg, traza, capturas):

@@ -1452,7 +1452,11 @@ def adb_guion(serial: str, archivo: str, paquete: str = "", desde: int = 1,
     expanden las variables $nombre del guión (ej. guión con `pin $clave` y
     valores="clave=1234"): el valor vive SOLO en esta llamada — ni en el .txt
     ni en disco — y en los `pin` se enmascara en toda salida. 'confirmado'
-    habilita los pasos pin de la corrida (un dale por corrida). Como el cliente
+    habilita los pasos pin de la corrida (un dale por corrida). ALEATORIOS por
+    corrida: en 'valores', monto=rnd(10000,30000,500) resuelve UN valor que
+    todos los $monto comparten; inline, $rnd(min,max,paso) y
+    $rnd_opcion(10%,20%,30%) ruedan un valor por ocurrencia. Lo elegido sale
+    en la traza y en la línea final ("Aleatorios: ..."). Como el cliente
     MCP corta las llamadas largas, un guión largo se pausa y devuelve 'seguí
     con desde=K'.
     """

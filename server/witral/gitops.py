@@ -238,3 +238,127 @@ def get_identidad(lugar: Lugar, repo: str) -> T.Resultado:
     nombre = n.salida.strip() or "(sin definir)"
     email = e.salida.strip() or "(sin definir)"
     return T.Resultado(0, f"{nombre} <{email}>", "")
+
+
+# --- Conflictos de merge -----------------------------------------------------
+
+def _rel_repo(repo: str, archivo: str) -> str:
+    """Ruta del archivo relativa a la raíz del lugar. 'archivo' viene relativo
+    al repo (como lo lista git); 'repo' es relativo a la raíz del lugar."""
+    a = archivo.replace("\\", "/").strip("/")
+    r = repo.replace("\\", "/").rstrip("/")
+    return f"{r}/{a}" if r and r != "." else a
+
+
+def _parsear_conflictos(texto: str) -> list[dict]:
+    """Hunks de conflicto de merge. Cada hunk: dict con ini/fin (índices
+    0-based de las líneas de marcador <<<<<<< y >>>>>>>), ours/theirs (listas
+    de líneas ORIGINALES, con su \\r si el archivo es CRLF) y etiquetas.
+    Soporta diff3: el bloque base (|||||||) se descarta al resolver."""
+    lineas = texto.split("\n")
+    hunks: list[dict] = []
+    i = 0
+    while i < len(lineas):
+        ln = lineas[i].rstrip("\r")
+        if ln.startswith("<<<<<<<"):
+            et_ours = ln[7:].strip()
+            ours: list = []
+            theirs: list = []
+            destino: list | None = ours
+            fin = -1
+            et_theirs = ""
+            j = i + 1
+            while j < len(lineas):
+                lj = lineas[j].rstrip("\r")
+                if lj.startswith("|||||||"):
+                    destino = None  # bloque base (diff3): no es de ningún lado
+                elif lj == "=======" and destino is not theirs:
+                    destino = theirs
+                elif lj.startswith(">>>>>>>"):
+                    et_theirs = lj[7:].strip()
+                    fin = j
+                    break
+                elif destino is not None:
+                    destino.append(lineas[j])
+                j += 1
+            if fin < 0:
+                break  # marcador sin cierre: no seguir parseando a ciegas
+            hunks.append({"ini": i, "fin": fin, "ours": ours, "theirs": theirs,
+                          "et_ours": et_ours, "et_theirs": et_theirs})
+            i = fin + 1
+        else:
+            i += 1
+    return hunks
+
+
+def _vista_lado(lado: list, tope: int = 8) -> list[str]:
+    """Vista previa de un lado del hunk: entero si es corto; si no, primeras 4
+    + conteo + últimas 2 (suficiente para elegir lado sin volcar 178 líneas)."""
+    v = [ln.rstrip("\r") for ln in lado]
+    if len(v) <= tope:
+        return [f"    {x}" for x in v]
+    return ([f"    {x}" for x in v[:4]]
+            + [f"    …({len(v) - 6} líneas más)…"]
+            + [f"    {x}" for x in v[-2:]])
+
+
+def conflictos_listar(lugar: Lugar, repo: str) -> T.Resultado:
+    """Archivos del repo con conflicto sin resolver (estado U)."""
+    return _git(lugar, repo, ["diff", "--name-only", "--diff-filter=U"])
+
+
+def conflictos(lugar: Lugar, repo: str, archivo: str) -> str:
+    """Hunks de conflicto de un archivo, numerados, con vista previa por lado."""
+    from . import archivos as A
+    texto = A.leer(lugar, _rel_repo(repo, archivo))
+    hunks = _parsear_conflictos(texto)
+    if not hunks:
+        return f"{archivo}: sin marcadores de conflicto."
+    partes = [f"{archivo}: {len(hunks)} hunk(s) de conflicto:"]
+    for n, h in enumerate(hunks, 1):
+        partes.append(
+            f"\nHUNK {n} (líneas {h['ini'] + 1}-{h['fin'] + 1}) — "
+            f"ours <{h['et_ours']}> {len(h['ours'])} líneas / "
+            f"theirs <{h['et_theirs']}> {len(h['theirs'])} líneas")
+        partes.append("  ours:")
+        partes += _vista_lado(h["ours"])
+        partes.append("  theirs:")
+        partes += _vista_lado(h["theirs"])
+    partes.append("\nResolver: git_resolver(repo, archivo, lado=\"ours\"|"
+                  "\"theirs\"|\"ambos\", hunk=N); hunk=0 = todos.")
+    return "\n".join(partes)
+
+
+def resolver(lugar: Lugar, repo: str, archivo: str, hunk: int, lado: str) -> str:
+    """Reemplaza hunk(s) de conflicto por el lado elegido, con backup. Las
+    líneas sobrevivientes conservan su EOL original (solo caen los marcadores
+    y el lado descartado)."""
+    from . import archivos as A
+    if lado not in ("ours", "theirs", "ambos"):
+        return "error: lado debe ser \"ours\", \"theirs\" o \"ambos\"."
+    ruta = _rel_repo(repo, archivo)
+    data = A._leer_bytes(lugar, ruta)
+    texto = A._decodificar(data)
+    lineas = texto.split("\n")
+    hunks = _parsear_conflictos(texto)
+    if not hunks:
+        return f"{archivo}: sin marcadores de conflicto (nada que resolver)."
+    if hunk < 0 or hunk > len(hunks):
+        return f"error: hunk {hunk} no existe ({archivo} tiene {len(hunks)})."
+    elegidos = hunks if hunk == 0 else [hunks[hunk - 1]]
+    A._backup(lugar, ruta, data)
+    hechas = []
+    for h in reversed(elegidos):  # de abajo hacia arriba: los índices no corren
+        reemplazo = (h["ours"] if lado == "ours" else
+                     h["theirs"] if lado == "theirs" else
+                     h["ours"] + h["theirs"])
+        lineas[h["ini"]: h["fin"] + 1] = reemplazo
+        hechas.append(f"líneas {h['ini'] + 1}-{h['fin'] + 1} -> {lado} "
+                      f"({len(reemplazo)} líneas)")
+    A._escribir_bytes(lugar, ruta, "\n".join(lineas).encode("utf-8"))
+    restantes = len(hunks) - len(elegidos)
+    cierre = (f"Quedan {restantes} hunk(s) sin resolver en el archivo."
+              if restantes else
+              "Sin hunks restantes: marcar resuelto con git_add.")
+    return (f"Resuelto en {archivo}: " + "; ".join(reversed(hechas)) +
+            f". {cierre} (backup hecho)")

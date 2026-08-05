@@ -208,14 +208,24 @@ def _verificar_sintaxis_texto(lg, archivo: str) -> str:
         nat = SX.correr_nativo(ext, ruta_abs)
         if nat is None:
             bin_falta = SX.NATIVOS.get(ext)
+            # Honestidad ante todo: un "balance OK" solo se lee tranquilizador
+            # si no se aclara qué NO cubre. Los errores reales de una sesión de
+            # Kotlin (referencias sin resolver, campos borrados, falta de
+            # suspend) son invisibles para el balance de delimitadores.
+            que_no_ve = (
+                "OJO: el 'balance OK' de arriba SOLO cubre delimitadores — NO "
+                "detecta referencias sin resolver, imports faltantes, tipos, "
+                "campos borrados ni suspend/when; eso solo lo ve el compilador. "
+                "Mitigación: buscar_contenido del símbolo tocado para enumerar "
+                "todos sus usos.")
             if bin_falta:
                 partes.append(
                     f"CAPA NATIVA — '{bin_falta.binario}' no está instalado; "
-                    f"sin verificación nativa para {ext}.")
+                    f"sin verificación nativa para {ext}. {que_no_ve}")
             else:
                 partes.append(
-                    f"CAPA NATIVA — no hay verificador nativo para {ext} "
-                    f"(solo capa universal).")
+                    f"CAPA NATIVA — no hay verificador nativo para {ext}. "
+                    f"{que_no_ve}")
         else:
             ok, salida = nat
             if ok:
@@ -331,6 +341,10 @@ def editar_linea(archivo: str, desde: int = 0, hasta: int = 0, nuevo: str = "",
     archivo y muestra esperado vs encontrado. Es la red de seguridad contra
     perder la cuenta de líneas. Sin 'ancla', edita el rango directo confiando
     en los números. Usá leer con rango antes para ubicar las líneas.
+    El ancla puede ser PARCIAL: con menos líneas que el rango valida solo el
+    COMIENZO; y con una línea "..." en el medio (ej. "primera\\n...\\núltima")
+    valida COMIENZO y FINAL — ideal para borrar bloques largos (nuevo="") sin
+    copiar las N líneas del rango: cubre el riesgo de desfase con dos líneas.
 
     PARÁMETRO 'verificar': si True, tras editar corre verificar_sintaxis sobre
     el archivo y agrega el resultado (ahorra una llamada aparte al editar código).
@@ -596,9 +610,25 @@ def _es_solo_lectura(comando: str) -> bool:
     return True
 
 
+def _envolver_shell(lg, comando: str, shell: str) -> str:
+    """Con shell="powershell" (solo lugares Windows), envuelve el comando para
+    PowerShell vía -EncodedCommand (base64 de UTF-16LE): el comando se escribe
+    en sintaxis PowerShell normal y viaja intacto, sin peleas de escapado con
+    cmd. Con shell vacío devuelve el comando tal cual."""
+    if not shell:
+        return comando
+    if shell not in ("powershell", "ps", "pwsh"):
+        raise ValueError(f"shell '{shell}' no soportado (usar \"powershell\").")
+    if not getattr(lg, "es_windows", False):
+        raise ValueError("shell=\"powershell\" es solo para lugares Windows.")
+    import base64 as _b64
+    cod = _b64.b64encode(comando.encode("utf-16-le")).decode("ascii")
+    return f"powershell -NoProfile -NonInteractive -EncodedCommand {cod}"
+
+
 @mcp.tool()
 def run(comando: str, donde: str = "local", confirmado: bool = False,
-        max_salida: int = 40000) -> str:
+        max_salida: int = 40000, shell: str = "") -> str:
     """
     Ejecuta un comando arbitrario en un lugar (local o remoto) y devuelve la
     salida. SIEMPRE requiere confirmado=True: es una escotilla de propósito
@@ -607,6 +637,10 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
     El directorio de trabajo es la RAÍZ del lugar (en local, Proyectos\\), así
     que las rutas relativas se resuelven contra ella. 'max_salida' acota los
     chars devueltos (trunca con aviso; salidas gigantes atascan el MCP).
+    'shell'="powershell" (solo Windows): el comando se escribe en PowerShell y
+    corre vía -EncodedCommand — recomendado en Windows en cuanto cmd empiece a
+    pelear (findstr sin alternación, %% en los for, comillas anidadas, head/tr
+    que a veces no están).
     """
     lg, aviso = _resolver(donde)
     if aviso:
@@ -623,6 +657,10 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
             f"Para continuar igual, reintentá con confirmado=True."
         )
     try:
+        comando = _envolver_shell(lg, comando, shell)
+    except ValueError as e:
+        return f"error: {e}"
+    try:
         # cwd = raíz del lugar (si está definida): rutas relativas predecibles.
         return _fmt(T.ejecutar(lg, comando, cwd=lg.raiz or None),
                     max_salida=max_salida)
@@ -631,7 +669,8 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
 
 
 @mcp.tool()
-def run_async(comando: str, donde: str = "local", confirmado: bool = False) -> str:
+def run_async(comando: str, donde: str = "local", confirmado: bool = False,
+              shell: str = "") -> str:
     """
     Lanza un comando LARGO en segundo plano (detached) y devuelve un id al
     instante. Es la forma correcta de correr trabajos de minutos: el cliente
@@ -651,6 +690,10 @@ def run_async(comando: str, donde: str = "local", confirmado: bool = False) -> s
             f"en '{donde}':\n  {comando}\n"
             f"Mostrá el comando al usuario y reintentá con confirmado=True."
         )
+    try:
+        comando = _envolver_shell(lg, comando, shell)
+    except ValueError as e:
+        return f"error: {e}"
     try:
         jid = TR.lanzar(lg, comando)
         return (f"Trabajo lanzado: id {jid} en {donde}.\n"
@@ -913,6 +956,49 @@ def git_show(repo: str, ref: str, donde: str = "local") -> str:
     if aviso:
         return aviso
     return _fmt(G.show(lg, repo, ref))
+
+
+@mcp.tool()
+def git_conflictos(repo: str, archivo: str = "", donde: str = "local") -> str:
+    """
+    Conflictos de merge. Sin 'archivo': lista los archivos del repo en
+    conflicto sin resolver. Con 'archivo' (ruta relativa al repo, como la
+    lista git): muestra los hunks numerados con sus líneas y una vista previa
+    de ours/theirs (los lados largos se resumen). Solo lectura. Resolver con
+    git_resolver.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        if not archivo:
+            r = G.conflictos_listar(lg, repo)
+            if r.codigo == 0 and not (r.salida or "").strip():
+                return "Sin archivos en conflicto."
+            return _fmt(r)
+        return G.conflictos(lg, repo, archivo)
+    except (RutaFueraDeRaiz, FileNotFoundError, T.TransporteError) as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
+def git_resolver(repo: str, archivo: str, lado: str, hunk: int = 0,
+                 donde: str = "local") -> str:
+    """
+    Resuelve hunks de conflicto de merge eligiendo lado: 'ours', 'theirs' o
+    'ambos' (ours seguido de theirs, sin marcadores). 'hunk'=N según la
+    numeración de git_conflictos, o 0 (defecto) para TODOS los hunks del
+    archivo. Backup automático antes de escribir; las líneas sobrevivientes
+    conservan su EOL. Tras resolver todo: git_add del archivo para marcarlo
+    resuelto (git_conflictos sin 'archivo' confirma qué queda).
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        return G.resolver(lg, repo, archivo, hunk, lado)
+    except (RutaFueraDeRaiz, FileNotFoundError, T.TransporteError) as e:
+        return f"error: {e}"
 
 
 @mcp.tool()

@@ -15,6 +15,8 @@ Verbos (uno por línea; '#' comenta; el primer token es el verbo):
   no_debe <texto>      asegura que el texto NO está (falla si aparece)
   atras                keyevent BACK
   captura              screenshot opt-in, adjunto al resultado
+  humano <mensaje>     PAUSA el guión y pide al humano ese paso (tarjeta, PIN
+                       físico); se retoma con desde=siguiente cuando esté hecho
 
 Como el cliente MCP corta las llamadas largas (~45s), el runner corre con un
 presupuesto de tiempo por llamada; si un guión largo no termina, devuelve
@@ -32,7 +34,7 @@ from . import transporte as T
 
 
 _VERBOS_ARG = {"paquete", "tap", "escribir", "permitir", "esperar", "esperar_log",
-               "verificar", "no_debe"}
+               "verificar", "no_debe", "humano"}
 _VERBOS_SOLO = {"inicio", "atras", "captura", "limpiar_log"}
 
 _PRESUPUESTO = 38  # segundos por llamada (bajo el corte del cliente MCP ~45s)
@@ -199,6 +201,17 @@ def correr(lugar: Lugar, serial: str, ruta: str, origen: Lugar | None = None,
     t0 = time.time()
     while idx <= total:
         num, verbo, arg = pasos[idx - 1]
+
+        # Paso HUMANO: el guión se pausa y devuelve el pedido tal cual — hay
+        # pasos que la máquina no debe dar (tarjeta real, PIN físico). El humano
+        # lo hace y el guión se retoma con desde=idx+1, contexto intacto.
+        if verbo == "humano":
+            traza.append(f"{idx:>2}/{total} humano {arg}  -> pausa (paso humano)")
+            cuerpo = (f"PASO HUMANO ({idx}/{total}): {arg}\n"
+                      f"Cuando esté hecho, seguí con adb_guion(..., "
+                      f"desde={idx + 1}).\n" + "\n".join(traza[-6:]))
+            return {"ok": True, "parcial": True, "siguiente": idx + 1,
+                    "texto": cuerpo, "imagenes": capturas}
 
         # Pasos de espera: acotar su timeout al PRESUPUESTO restante de la llamada
         # para no pasarse del corte del cliente MCP (~45-60s). Si el presupuesto lo

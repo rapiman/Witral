@@ -1436,17 +1436,25 @@ def serial_enviar(puerto: str, texto: str, baud: int = 9600, bits: int = 8,
 
 @mcp.tool()
 def adb_guion(serial: str, archivo: str, paquete: str = "", desde: int = 1,
-              origen: str = "", donde: str = "local"):
+              origen: str = "", donde: str = "local", confirmado: bool = False,
+              valores: str = ""):
     """
     Corre un GUIÓN de UI del lado del dispositivo y devuelve UNA línea si pasó;
     ante el primer fallo junta captura + textos de pantalla + logcat (barato
     cuando pasa, caro solo cuando falla). Verbos: inicio (estado conocido:
     logcat 16M/limpio + force-stop + relanzar), limpiar_log (logcat -c sin
     force-stop), tap, escribir (teclea/tapea; acepta cadenas 'a+b+c'), permitir,
-    esperar, esperar_log, verificar, no_debe, atras, captura. 'archivo' es la ruta del
-    guión (en 'origen', por defecto el mismo 'donde'); 'paquete' la app (o la
-    directiva 'paquete <pkg>' dentro del guión). Como el cliente MCP corta las
-    llamadas largas, un guión largo se pausa y devuelve 'seguí con desde=K'.
+    esperar, esperar_log, verificar, no_debe, atras, captura, humano (pausa y
+    pide el paso al usuario), pin (teclea un PIN sin valor de seguridad; SOLO
+    con confirmado=True). 'archivo' es la ruta del guión (en 'origen', por
+    defecto el mismo 'donde'); 'paquete' la app (o la directiva 'paquete <pkg>'
+    dentro del guión). 'valores': pares "nombre=valor" separados por ';' que
+    expanden las variables $nombre del guión (ej. guión con `pin $clave` y
+    valores="clave=1234"): el valor vive SOLO en esta llamada — ni en el .txt
+    ni en disco — y en los `pin` se enmascara en toda salida. 'confirmado'
+    habilita los pasos pin de la corrida (un dale por corrida). Como el cliente
+    MCP corta las llamadas largas, un guión largo se pausa y devuelve 'seguí
+    con desde=K'.
     """
     lg, aviso = _resolver(donde)
     if aviso:
@@ -1457,7 +1465,8 @@ def adb_guion(serial: str, archivo: str, paquete: str = "", desde: int = 1,
         if aviso:
             return aviso
     try:
-        res = GU.correr(lg, serial, archivo, origen=org, paquete=paquete, desde=desde)
+        res = GU.correr(lg, serial, archivo, origen=org, paquete=paquete,
+                        desde=desde, confirmado=confirmado, valores=valores)
     except Exception as e:
         return f"error inesperado corriendo el guión: {e}"
     contenido = [res["texto"]]

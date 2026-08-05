@@ -17,6 +17,10 @@ Verbos (uno por línea; '#' comenta; el primer token es el verbo):
   captura              screenshot opt-in, adjunto al resultado
   humano <mensaje>     PAUSA el guión y pide al humano ese paso (tarjeta, PIN
                        físico); se retoma con desde=siguiente cuando esté hecho
+  pin <dígitos|$var>   teclea un PIN SIN valor de seguridad (menú/config), solo
+                       con confirmado=True en la llamada; el valor se pasa como
+                       $variable en 'valores' (vive solo en la conversación) y
+                       se enmascara en toda salida
 
 Como el cliente MCP corta las llamadas largas (~45s), el runner corre con un
 presupuesto de tiempo por llamada; si un guión largo no termina, devuelve
@@ -34,7 +38,14 @@ from . import transporte as T
 
 
 _VERBOS_ARG = {"paquete", "tap", "escribir", "permitir", "esperar", "esperar_log",
-               "verificar", "no_debe", "humano"}
+               "verificar", "no_debe", "humano", "pin"}
+
+# Variables $nombre en los args de un guión: se expanden con el parámetro
+# 'valores' de adb_guion. El valor vive SOLO en la llamada (la conversación):
+# ni en el .txt del guión, ni en disco, ni en el repo. Un '$' de regex al final
+# de un patrón (p. ej. 'APROBADO$') no matchea (no lo sigue un identificador);
+# para un '$' literal seguido de letras en un patrón, usar '[$]'.
+_VAR_RE = re.compile(r"\$([A-Za-z_][A-Za-z0-9_]*)")
 _VERBOS_SOLO = {"inicio", "atras", "captura", "limpiar_log"}
 
 _PRESUPUESTO = 38  # segundos por llamada (bajo el corte del cliente MCP ~45s)
@@ -177,8 +188,12 @@ def _pausa(idx: int, total: int, traza: list, capturas: list, nota: str = "") ->
 
 
 def correr(lugar: Lugar, serial: str, ruta: str, origen: Lugar | None = None,
-           paquete: str = "", desde: int = 1) -> dict:
-    """Corre el guión. Devuelve dict {ok, texto, imagenes, [parcial, siguiente]}."""
+           paquete: str = "", desde: int = 1, confirmado: bool = False,
+           valores: str = "") -> dict:
+    """Corre el guión. Devuelve dict {ok, texto, imagenes, [parcial, siguiente]}.
+    'valores': pares "nombre=valor" separados por ';' que expanden las
+    variables $nombre del guión — el valor vive solo en la llamada.
+    'confirmado': habilita los pasos `pin` de esta corrida (un dale por corrida)."""
     from . import archivos as A
     org = origen if origen is not None else lugar
     try:
@@ -193,6 +208,38 @@ def correr(lugar: Lugar, serial: str, ruta: str, origen: Lugar | None = None,
     if not pasos:
         return {"ok": False, "texto": "el guión no tiene pasos", "imagenes": []}
     pkg = paquete or pkg_dir or ""
+    # Variables $nombre: parsear 'valores' y validar ANTES de tocar el device
+    # (si falta una, no se ejecutó nada y el mensaje dice cuál).
+    vals: dict = {}
+    for par in re.split(r"[;\n]", valores or ""):
+        par = par.strip()
+        if not par:
+            continue
+        if "=" not in par:
+            return {"ok": False, "imagenes": [], "texto":
+                    f"'valores' inválido: '{par}' (formato nombre=valor, "
+                    f"separados por ';')."}
+        k, v = par.split("=", 1)
+        vals[k.strip()] = v.strip()
+    usadas = {m.group(1) for _, _, a in pasos for m in _VAR_RE.finditer(a)}
+    faltan = sorted(usadas - set(vals))
+    if faltan:
+        return {"ok": False, "imagenes": [], "texto":
+                "faltan valores para: $" + ", $".join(faltan) +
+                " — pasalos en 'valores' (\"nombre=valor;...\"). "
+                "No se ejecutó nada."}
+
+    def _exp(a: str) -> str:
+        return _VAR_RE.sub(lambda m: vals[m.group(1)], a)
+
+    def _mascarar(msj: str, secreto: str) -> str:
+        """Borra el valor del PIN (y sus segmentos de dígitos) de un mensaje
+        antes de mostrarlo: el valor vive en la conversación, no en la salida."""
+        for seg in [secreto] + [s for s in secreto.split("+") if s.strip().isdigit()]:
+            if seg:
+                msj = msj.replace(seg, "····")
+        return msj
+
     permitidos: set = set()
     capturas: list = []
     traza: list = []
@@ -201,6 +248,34 @@ def correr(lugar: Lugar, serial: str, ruta: str, origen: Lugar | None = None,
     t0 = time.time()
     while idx <= total:
         num, verbo, arg = pasos[idx - 1]
+        arg = _exp(arg)  # variables $nombre resueltas (pin se enmascara al mostrar)
+
+        # Paso PIN: dígitos que la máquina SÍ puede tipear (PIN de menú/config
+        # sin valor de seguridad), pero solo con el visto del usuario: requiere
+        # confirmado=True en la llamada (un dale habilita todos los pin de la
+        # corrida). El PIN de tarjeta en teclado seguro sigue siendo `humano`.
+        if verbo == "pin":
+            if not confirmado:
+                traza.append(f"{idx:>2}/{total} pin ····  -> pausa (falta confirmado)")
+                cuerpo = (f"PASO PIN ({idx}/{total}): la máquina puede tipearlo, "
+                          f"pero requiere el visto del usuario. Con su dale, "
+                          f"reintentá con confirmado=True y desde={idx}; o se "
+                          f"tipea a mano y se sigue con desde={idx + 1}.\n"
+                          + "\n".join(traza[-6:]))
+                return {"ok": True, "parcial": True, "siguiente": idx,
+                        "texto": cuerpo, "imagenes": capturas}
+            r = M.adb_escribir(lugar, serial, arg)
+            ok = r.startswith("OK:")
+            traza.append(f"{idx:>2}/{total} pin ····  -> "
+                         + ("OK (tecleado; valor no mostrado)" if ok
+                            else _mascarar(r, arg)))
+            if not ok:
+                return _fallo(lugar, serial, idx, total, "pin", "····",
+                              _mascarar(r, arg), traza, capturas)
+            idx += 1
+            if idx <= total and (time.time() - t0) >= _PRESUPUESTO:
+                return _pausa(idx, total, traza, capturas)
+            continue
 
         # Paso HUMANO: el guión se pausa y devuelve el pedido tal cual — hay
         # pasos que la máquina no debe dar (tarjeta real, PIN físico). El humano

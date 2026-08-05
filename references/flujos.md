@@ -73,8 +73,11 @@ lanzado en una conversación se puede consultar desde otra.
 ## Compilar y desplegar un artefacto (Java/Android)
 
 1. **Compilar** — `gradle_build(proyecto, tarea, donde)`. En unix/remoto compila y
-   devuelve la salida. En **local Windows NO compila** (sandbox): el usuario corre
-   `gradlew assembleDebug` en su terminal.
+   devuelve la salida. En **local Windows compila como trabajo asíncrono** (con los
+   fixes del sandbox puestos solos: tmpdir AF_UNIX + estrategia daemon de Kotlin):
+   devuelve un id, seguirlo con `run_esperar(id)` hasta el código final (0 = BUILD
+   SUCCESSFUL). Si falla, los errores de Kotlin son las líneas `e:` del out.log:
+   `buscar_contenido(".witral/jobs/<id>/out.log", "^e:")` los aísla.
 2. **Instalar en el POS** — `adb_install(serial, apk, donde)`.
 3. **Relanzar y capturar** — `adb_relanzar(serial, paquete, donde)` y
    `adb_logcat(serial, tags=..., limpiar_antes=True, donde)` (flujo: limpiar →
@@ -117,6 +120,25 @@ Correr con `adb_guion(serial, "ruta/humo.txt", paquete="com.transformapp.pos")`.
 Guiones largos se pausan y devuelven `seguí con desde=K`. Un `tap` a un texto de la
 lista negra (cierre de turno, anulación, borrar llaves...) se niega salvo que el
 guión traiga `permitir <texto>` antes.
+
+**Pasos humanos, PIN y variables:**
+- `humano <mensaje>` pausa el guión y pide ese paso al usuario (tarjeta real, PIN
+  en teclado seguro); se retoma con `desde=` cuando esté hecho.
+- `pin $clave+Continuar` teclea un PIN *sin valor de seguridad* (clave de menú/
+  config) — SOLO si la llamada trae `confirmado=True` (un dale habilita los pin de
+  la corrida). El valor va en la llamada (`valores="clave=1234"`), nunca en el
+  `.txt`, y se enmascara `····` en toda salida. Ejemplo real:
+  `guiones/menu_integraciones.txt` (menú → Integraciones → clave → adentro).
+- Variables `$nombre` en cualquier verbo, resueltas con `valores="nombre=valor;..."`
+  (`escribir $monto+Continuar`): si falta una, el guión no ejecuta nada y dice cuál.
+
+**Aleatorios por corrida (QA con variedad):**
+- En `valores`: `monto=rnd(10000,30000,500)` — un valor por corrida, compartido por
+  todos los `$monto` (consistente entre tipear y verificar).
+- Inline: `escribir $rnd(10000,30000,500)+Continuar`,
+  `tap $rnd_opcion(10%,20%,30%)+Continuar` — cada ocurrencia rueda el suyo.
+- Lo elegido queda en la traza y en la línea final (`Aleatorios: ...`); una
+  expresión mal formada aborta antes de tocar el device.
 
 **Guión de venta (rápido) y buenas prácticas de velocidad:**
 Un flujo completo (monto → propina → pago) con el resultado asegurado por logcat:

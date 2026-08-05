@@ -7,6 +7,63 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 10 — feedback Kotlin/merge: conflictos, PIN, aleatorios y COMPILAR
+
+**El grande: `gradle_build` compila en local Windows.** El histórico
+*"Unable to establish loopback connection"* nunca fue el loopback TCP: desde
+JDK 16 los pipes NIO de Java crean un socket **AF_UNIX** en el TMP, y ahí el
+sandbox del cliente MCP lo rompe con EINVAL (diagnóstico por descarte: TCP de
+Java funciona, AF_UNIX en Proyectos funciona, AF_UNIX en TMP falla). Fixes:
+`JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=<raíz>\.witral\tmpjava` (lo pone
+`gradle_build` solo) y `-Pkotlin.compiler.execution.strategy=daemon` (proyectos
+que fijan in-process mueren de OOM de metaspace; el daemon de Kotlin usa TCP y
+funciona). El build corre como trabajo asíncrono: `gradle_build` devuelve el id
+al toque y se sigue con `run_esperar(id)`; errores de Kotlin = líneas `e:` del
+out.log del job. Verificado: APK completo de bcipagos (1258 tareas, 5m) dentro
+del sandbox.
+
+**Añadido**
+- `git_conflictos(repo, archivo?)` — sin archivo lista los archivos en
+  conflicto; con archivo muestra los hunks numerados con vista previa de
+  ours/theirs (lados largos resumidos). Soporta diff3.
+- `git_resolver(repo, archivo, lado, hunk)` — resuelve por hunk (o todos) con
+  "ours"/"theirs"/"ambos", backup y EOL preservado.
+- Ancla de BORDES en `editar_linea`: una línea `...` en el ancla valida
+  comienzo Y final del rango — borrar bloques de 178 líneas validando 2.
+  (El ancla parcial de comienzo ya existía; ahora está documentada.)
+- Verbo `humano <mensaje>` en guiones: pausa y pide ese paso al usuario
+  (tarjeta real, PIN físico); se retoma con `desde=`.
+- Verbo `pin` + variables `$nombre` en guiones: PIN sin valor de seguridad que
+  la máquina SÍ tipea, solo con `confirmado=True`; el valor viaja en
+  `valores="clave=1234"` (vive solo en la llamada, jamás en el .txt ni en
+  disco) y se enmascara (····) en traza y fallos.
+- Aleatorios por corrida en guiones: `monto=rnd(10000,30000,500)` en `valores`
+  (un valor compartido por corrida) o `$rnd(...)`/`$rnd_opcion(a,b,c)` inline
+  (un valor por ocurrencia). Validación previa; lo elegido queda en la traza y
+  en la línea final ("Aleatorios: ...").
+- `run`/`run_async` con `shell="powershell"` (solo Windows): el comando viaja
+  en base64 UTF-16LE vía `-EncodedCommand` — sin peleas de escapado con cmd.
+
+**Cambiado**
+- `verificar_sintaxis` honesto: cuando no hay verificador nativo (.kt), el
+  mensaje enumera qué NO detecta (referencias sin resolver, imports, tipos,
+  campos borrados, suspend) en vez de un "balance OK" tranquilizador de más.
+
+### Ronda 9 — tiempos de los guiones
+
+- `esperar_log` bloqueante del lado del device: barrido inmediato del buffer y
+  después `logcat -e <regex> -m 1` (latencia de detección ~0, un round-trip),
+  con fallback al poll clásico. FIX de un falso positivo descubierto en vivo:
+  adbd loguea la línea de comando de cada `adb shell`, así que el patrón en
+  claro se matcheaba a sí mismo — ahora viaja en base64 y se decodifica en el
+  device, y toda línea de adbd se descarta del matcheo.
+- Cadenas `+` en UN solo round-trip adb (todos los segmentos en un shell del
+  device, `sleep 0.2` entre segmentos).
+- Polls de UI 0.4s→0.2s; `inicio` sin doble espera (1.5s→0.5s).
+- Guiones optimizados: `venta_dividir` colapsa esperar+escribir+tap en una
+  cadena (gate y acción a la vez); `venta_calculadora` suma `Pagar` a la
+  cadena. Verificado en vivo: los 4 guiones verdes con ventas aprobadas.
+
 ### Ronda 8 — robustez de guiones (hallado explorando división de cuentas)
 
 - **Cadenas `+` sin ejecución parcial:** `_ejecutar_cadena` ahora valida que

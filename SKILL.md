@@ -107,7 +107,12 @@ vuelva un veredicto, no que mire cada pantalla (eso gasta tokens). Por eso:
   dispositivo y devuelve **una línea** si pasó; si falla, junta captura + textos + logcat.
   Barato cuando pasa, caro solo cuando falla. Los guiones se guardan y se reusan (\"iniciá
   una venta\" → correr el guión). Lista negra de textos peligrosos (cierre de turno,
-  anulación) bajo confirmación; tarjeta y PIN son siempre interacción humana.
+  anulación) bajo confirmación. Tarjeta y PIN de teclado seguro son siempre interacción
+  humana (verbo `humano`); un PIN *sin* valor de seguridad (clave de menú/config) sí lo
+  teclea la máquina con el verbo `pin` + `confirmado=True`, con el valor viajando solo en
+  la llamada (`valores="clave=..."`, enmascarado en toda salida). Los guiones aceptan
+  variables `$nombre` y aleatorios por corrida (`rnd(min,max,paso)` / `$rnd_opcion(a,b,c)`)
+  para QA con variedad.
 
 ## Referencias
 

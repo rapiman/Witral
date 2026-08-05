@@ -224,6 +224,9 @@ Dos coordenadas: `donde` (qué máquina corre `adb`) y `serial` (qué dispositiv
 ## Gradle
 
 - `gradle_build(proyecto, tarea, donde)` — compila con el `gradlew` del proyecto.
-  En unix/remoto compila y devuelve la salida. En **local Windows NO compila** (el
-  sandbox del cliente bloquea el loopback que Gradle/Java necesitan): el usuario
-  compila en su terminal y Witral despliega el APK con `adb_install`.
+  En unix/remoto compila síncrono y devuelve la salida. En **local Windows compila
+  como trabajo asíncrono** con los fixes del sandbox puestos automáticamente
+  (JAVA_TOOL_OPTIONS redirige el socket AF_UNIX de los pipes NIO fuera del TMP +
+  estrategia daemon de Kotlin): devuelve el id, seguirlo con `run_esperar(id)`;
+  código 0 = BUILD SUCCESSFUL, errores de Kotlin = líneas `e:` del out.log del
+  job. Después `adb_install`.

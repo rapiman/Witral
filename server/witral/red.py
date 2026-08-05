@@ -163,3 +163,96 @@ def tcp_socket(host: str, puerto: int, enviar: str | None = None,
             )
     except Exception as e:
         return f"error: {e}"
+
+
+# --- SonarCloud ---------------------------------------------------------------
+
+def _token_sonar() -> str | None:
+    """
+    Token de SonarCloud desde el gradle.properties del USUARIO
+    (~/.gradle/gradle.properties, clave systemProp.sonar.token): el mismo que
+    usa `gradlew sonar`, así hay UNA sola fuente de verdad y nada secreto en
+    el repo de Witral.
+    """
+    import os
+    ruta = os.path.join(os.path.expanduser("~"), ".gradle", "gradle.properties")
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            for linea in f:
+                linea = linea.strip()
+                if linea.startswith("systemProp.sonar.token="):
+                    return linea.split("=", 1)[1].strip() or None
+    except OSError:
+        return None
+    return None
+
+
+_SONAR_ORDEN = {"BLOCKER": 0, "CRITICAL": 1, "MAJOR": 2, "MINOR": 3, "INFO": 4}
+
+
+def sonar_issues(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
+                 nuevos: bool = False,
+                 host: str = "https://sonarcloud.io") -> str:
+    """
+    Issues ABIERTOS en SonarCloud, formateados compactos (sin JSON crudo).
+
+    Con 'ruta' (relativa a la raíz del repo): el detalle de ESE archivo
+    (L<línea> [SEVERIDAD] regla: mensaje), ordenado por severidad y línea.
+    Sin 'ruta': resumen del proyecto por severidad. 'nuevos'=True acota al
+    código nuevo (leak period). Solo lectura; refleja el ÚLTIMO análisis
+    subido, no el working tree.
+    """
+    import json as _json
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    token = _token_sonar()
+    if not token:
+        return ("error: no hay systemProp.sonar.token en "
+                "~/.gradle/gradle.properties (el mismo token que usa "
+                "`gradlew sonar`).")
+
+    ruta_norm = ruta.replace("\\", "/").strip().strip("/")
+    comp = f"{proyecto}:{ruta_norm}" if ruta_norm else proyecto
+    params = {"componentKeys": comp, "resolved": "false", "ps": "200",
+              "facets": "severities"}
+    if nuevos:
+        params["sinceLeakPeriod"] = "true"
+    url = f"{host}/api/issues/search?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url)
+    req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = _json.loads(resp.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        cuerpo = e.read().decode("utf-8", "replace")[:300]
+        return (f"error: SonarCloud respondió HTTP {e.code} ({e.reason}). "
+                f"{cuerpo}\n(¿token vigente? ¿ruta/proyecto correctos?)")
+    except Exception as e:
+        return f"error consultando SonarCloud: {e}"
+
+    total = data.get("total", 0)
+    alcance = " (solo código nuevo)" if nuevos else ""
+
+    if not ruta_norm:
+        sev: dict = {}
+        for f in data.get("facets", []):
+            if f.get("property") == "severities":
+                sev = {v.get("val"): v.get("count", 0)
+                       for v in f.get("values", [])}
+        resumen = "  ".join(f"{k}:{sev.get(k, 0)}" for k in _SONAR_ORDEN)
+        return (f"{proyecto}{alcance}: {total} issues abiertos — {resumen}\n"
+                f"(pasar 'ruta' para el detalle de un archivo)")
+
+    lineas = [f"{total} issue(s) abiertos en {ruta_norm}{alcance}"]
+    issues = sorted(
+        data.get("issues", []),
+        key=lambda i: (_SONAR_ORDEN.get(i.get("severity"), 9),
+                       i.get("line") or 0))
+    for i in issues:
+        lineas.append(f"  L{i.get('line', '?')} [{i.get('severity')}] "
+                      f"{i.get('rule')}: {i.get('message')}")
+    if total > len(issues):
+        lineas.append(f"  ... y {total - len(issues)} más (tope de página 200)")
+    return "\n".join(lineas)

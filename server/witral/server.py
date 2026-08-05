@@ -1240,6 +1240,23 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str = "",
 
 
 @mcp.tool()
+def sonar_archivo(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
+                  nuevos: bool = False) -> str:
+    """
+    Issues ABIERTOS de SonarCloud, compactos y ya formateados. Con 'ruta'
+    (relativa a la raíz del repo, acepta / o \\): el detalle de ESE archivo
+    — L<línea> [SEVERIDAD] regla: mensaje, ordenado por severidad — para
+    mirar ANTES de tocar un archivo y verificar después. Sin 'ruta':
+    resumen del proyecto por severidad. 'nuevos'=True: solo código nuevo
+    (leak period). El token se lee de ~/.gradle/gradle.properties
+    (systemProp.sonar.token, el mismo de `gradlew sonar`). Solo lectura.
+    OJO: refleja el ÚLTIMO análisis subido, no el working tree — tras
+    editar, refrescar con gradle_build(proyecto, "sonar") (~5 min).
+    """
+    return R.sonar_issues(ruta, proyecto, nuevos)
+
+
+@mcp.tool()
 def tcp_socket(host: str, puerto: int, enviar: str = "", recibir_bytes: int = 4096) -> str:
     """Conecta TCP a host:puerto, opcionalmente envía y devuelve lo recibido."""
     return R.tcp_socket(host, puerto, enviar or None, recibir_bytes)

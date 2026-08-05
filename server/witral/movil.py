@@ -578,22 +578,39 @@ def gradle_build(lugar: Lugar, proyecto: str, tarea: str) -> str:
     """
     Compila con el gradlew del proyecto.
 
-    En unix/remoto compila síncrono y devuelve la salida. En local Windows NO
-    puede compilar: el build necesita sockets loopback que el sandbox del cliente
-    MCP bloquea (ver Notas técnicas del README). Devuelve un aviso para correr el
-    build en una terminal propia.
+    En unix/remoto compila síncrono y devuelve la salida. En local Windows
+    compila como TRABAJO asíncrono (run_esperar/run_status para seguirlo) con
+    el fix del sandbox: los pipes NIO de Java (JDK 16+) crean un socket
+    AF_UNIX en el TMP, donde el sandbox del cliente MCP lo rompe con EINVAL
+    ("Unable to establish loopback connection"); JAVA_TOOL_OPTIONS con
+    -Djdk.net.unixdomain.tmpdir apuntando a una carpeta de la raíz lo evita
+    (diagnosticado y verificado en vivo, ronda 10).
     """
     if lugar.es_local:
         p = normalizar(lugar.raiz, proyecto)
         if lugar.es_windows:
-            return (
-                "No puedo compilar desde acá: el sandbox del cliente MCP bloquea "
-                "los sockets loopback que Gradle/Java necesitan. Corré el build en "
-                "tu terminal:\n"
-                f'    cd "{p}"\n'
-                f"    .\\gradlew {tarea}\n"
-                "Una vez generado el APK, puedo desplegarlo con adb_install."
-            )
+            from pathlib import Path as _P
+            from . import trabajos as TR
+            if not (p / "gradlew.bat").exists():
+                return f"error: no encuentro gradlew.bat en {p}"
+            tmpjava = _P(lugar.raiz) / ".witral" / "tmpjava"
+            tmpjava.mkdir(parents=True, exist_ok=True)
+            # -Pkotlin.compiler.execution.strategy=daemon: si el proyecto fija
+            # in-process (como bcipagos), el compilador Kotlin infla el
+            # metaspace del daemon de Gradle y muere con OOM; el daemon de
+            # Kotlin usa TCP loopback (funciona bajo el sandbox) y compila
+            # aparte. Si el proyecto no fija nada, daemon ya era el default.
+            cmd = (f'set "JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir={tmpjava}" '
+                   f'&& cd /d "{p}" && gradlew.bat {tarea} '
+                   f'-Pkotlin.compiler.execution.strategy=daemon')
+            jid = TR.lanzar(lugar, cmd)
+            return (f"Build lanzado como trabajo: id {jid} ({proyecto} :: {tarea}).\n"
+                    f"Seguilo con run_esperar(id=\"{jid}\") hasta que termine "
+                    f"(un build frío puede tomar varios minutos; re-llamar si "
+                    f"sigue). Al final: código 0 = BUILD SUCCESSFUL; si falla, "
+                    f"los errores de Kotlin son las líneas 'e:' del log "
+                    f"(buscar_contenido sobre .witral/jobs/{jid}/out.log con "
+                    f"patron=\"^e:\" los aísla).")
         salida = T.ejecutar(lugar, ["./gradlew", tarea], cwd=str(p), timeout=1800)
         return _fmt_resultado(salida)
     salida = T.ejecutar(lugar, f"cd '{proyecto}' && ./gradlew {tarea}", timeout=1800)

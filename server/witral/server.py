@@ -1536,11 +1536,13 @@ def datastore_set(serial: str, paquete: str, archivo: str, clave: str,
 def gradle_build(proyecto: str, tarea: str = "assembleDebug",
                  donde: str = "local") -> str:
     """
-    Compila un proyecto con su gradlew. En local Windows el build NO puede correr
-    dentro del sandbox del cliente MCP (Gradle necesita sockets loopback), así que
-    se lanza como tarea programada y esta función RETORNA AL TOQUE con el nombre
-    de la tarea: seguí el avance con tarea_estado(nombre). En unix/remoto compila
-    de forma síncrona (ahí no hay sandbox) y devuelve la salida directamente.
+    Compila un proyecto con su gradlew. En local Windows se lanza como TRABAJO
+    asíncrono (con el fix del sandbox: JAVA_TOOL_OPTIONS redirige el socket
+    AF_UNIX de los pipes NIO fuera del TMP) y esta función RETORNA AL TOQUE
+    con el id del trabajo: seguirlo con run_esperar(id) hasta el código final
+    (0 = BUILD SUCCESSFUL). Si falla, los errores de Kotlin son las líneas
+    'e:' del out.log del job. En unix/remoto compila síncrono y devuelve la
+    salida directamente.
     """
     lg, aviso = _resolver(donde)
     if aviso:

@@ -167,12 +167,12 @@ def tcp_socket(host: str, puerto: int, enviar: str | None = None,
 
 # --- SonarCloud ---------------------------------------------------------------
 
-def _token_sonar() -> str | None:
+def _prop_gradle(clave: str) -> str | None:
     """
-    Token de SonarCloud desde el gradle.properties del USUARIO
-    (~/.gradle/gradle.properties, clave systemProp.sonar.token): el mismo que
-    usa `gradlew sonar`, así hay UNA sola fuente de verdad y nada secreto en
-    el repo de Witral.
+    Lee una propiedad del gradle.properties del USUARIO
+    (~/.gradle/gradle.properties): el mismo archivo que usa `gradlew`, así hay
+    UNA sola fuente de verdad y nada secreto ni específico de un proyecto
+    dentro del repo de Witral.
     """
     import os
     ruta = os.path.join(os.path.expanduser("~"), ".gradle", "gradle.properties")
@@ -180,17 +180,34 @@ def _token_sonar() -> str | None:
         with open(ruta, "r", encoding="utf-8") as f:
             for linea in f:
                 linea = linea.strip()
-                if linea.startswith("systemProp.sonar.token="):
+                if linea.startswith(clave + "="):
                     return linea.split("=", 1)[1].strip() or None
     except OSError:
         return None
     return None
 
 
+def _token_sonar() -> str | None:
+    """Token de SonarCloud: systemProp.sonar.token, el de `gradlew sonar`."""
+    return _prop_gradle("systemProp.sonar.token")
+
+
+def _proyecto_sonar() -> str | None:
+    """
+    Project key por defecto. NO se cablea en el código (depende de en qué
+    proyecto se esté trabajando): sale de la variable de entorno
+    WITRAL_SONAR_PROYECTO o de systemProp.sonar.projectKey del
+    gradle.properties del usuario.
+    """
+    import os
+    return (os.environ.get("WITRAL_SONAR_PROYECTO")
+            or _prop_gradle("systemProp.sonar.projectKey"))
+
+
 _SONAR_ORDEN = {"BLOCKER": 0, "CRITICAL": 1, "MAJOR": 2, "MINOR": 3, "INFO": 4}
 
 
-def sonar_issues(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
+def sonar_issues(ruta: str = "", proyecto: str = "",
                  nuevos: bool = False,
                  host: str = "https://sonarcloud.io") -> str:
     """
@@ -201,6 +218,9 @@ def sonar_issues(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
     Sin 'ruta': resumen del proyecto por severidad. 'nuevos'=True acota al
     código nuevo (leak period). Solo lectura; refleja el ÚLTIMO análisis
     subido, no el working tree.
+
+    'proyecto' vacío => se resuelve con WITRAL_SONAR_PROYECTO o con
+    systemProp.sonar.projectKey del gradle.properties del usuario.
     """
     import json as _json
     import urllib.error
@@ -212,6 +232,13 @@ def sonar_issues(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
         return ("error: no hay systemProp.sonar.token en "
                 "~/.gradle/gradle.properties (el mismo token que usa "
                 "`gradlew sonar`).")
+
+    proyecto = proyecto or _proyecto_sonar() or ""
+    if not proyecto:
+        return ("error: falta el project key de SonarCloud. Pasalo en "
+                "'proyecto', o fijalo una vez en la variable de entorno "
+                "WITRAL_SONAR_PROYECTO o en systemProp.sonar.projectKey de "
+                "~/.gradle/gradle.properties.")
 
     ruta_norm = ruta.replace("\\", "/").strip().strip("/")
     comp = f"{proyecto}:{ruta_norm}" if ruta_norm else proyecto

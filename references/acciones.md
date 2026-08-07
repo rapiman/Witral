@@ -102,7 +102,7 @@ Elegir: texto corto y único a la vista → `editar_literal`. Bloque por rango �
 ## Copiar y desplegar entre lugares
 
 - `copiar(origen, destino, ...)` — copia un archivo entre lugares (SFTP). Forma
-  COMPACTA: `origen="local:folil/web/app.py"`, `destino="wedwed:/srv/app/app.py"`
+  COMPACTA: `origen="local:miapp/web/app.py"`, `destino="wedwed:/srv/app/app.py"`
   (el prefijo es el lugar solo si es conocido; así `C:\...` y `/srv/...` no se
   confunden). También la forma explícita (origen_ruta/origen_lugar/destino_lugar/
   destino_ruta). Hacia un lugar sensible pide `confirmado=True`.
@@ -123,7 +123,7 @@ Elegir: texto corto y único a la vista → `editar_literal`. Bloque por rango �
 - `psql_aplicar(donde, ruta_sql, origen, base, confirmado)` — aplica un `.sql`
   (migraciones). Witral LEE el archivo (desde `origen`, por defecto el mismo `donde`)
   y lo manda por stdin al psql de la BASE: sirve para bases detrás de túnel cuyo psql
-  no ve el filesystem local (ej. `origen="local"`, `donde="folil_porafuera"`).
+  no ve el filesystem local (ej. `origen="local"`, `donde="dev_porafuera"`).
   Siempre pide `confirmado=True`.
 
 ---

@@ -596,7 +596,7 @@ def gradle_build(lugar: Lugar, proyecto: str, tarea: str) -> str:
             tmpjava = _P(lugar.raiz) / ".witral" / "tmpjava"
             tmpjava.mkdir(parents=True, exist_ok=True)
             # -Pkotlin.compiler.execution.strategy=daemon: si el proyecto fija
-            # in-process (como bcipagos), el compilador Kotlin infla el
+            # in-process (algunos proyectos lo fijan), el compilador Kotlin infla el
             # metaspace del daemon de Gradle y muere con OOM; el daemon de
             # Kotlin usa TCP loopback (funciona bajo el sandbox) y compila
             # aparte. Si el proyecto no fija nada, daemon ya era el default.

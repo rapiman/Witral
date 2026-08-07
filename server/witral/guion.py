@@ -144,7 +144,7 @@ def _inicio(lugar: Lugar, serial: str, pkg: str):
     # SEN20260804 se espera el FOCO DE ENTRADA, no un rótulo en pantalla.
     #
     # "El texto ya se ve" NO significa "la ventana ya recibe toques". Medido en
-    # un A920Pro: el árbol de vistas se puede volcar a los 2s de relanzar, pero
+    # un POS real: el árbol de vistas se puede volcar a los 2s de relanzar, pero
     # el foco recién llega a los ~7.4s ("Displayed +7s751ms"). Todo tap antes de
     # eso se lo traga el sistema EN SILENCIO — `input tap` no falla, la tool
     # responde OK — y el guión se cae dos o tres pasos después, con un mensaje

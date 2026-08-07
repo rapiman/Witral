@@ -19,7 +19,7 @@ Java funciona, AF_UNIX en Proyectos funciona, AF_UNIX en TMP falla). Fixes:
 que fijan in-process mueren de OOM de metaspace; el daemon de Kotlin usa TCP y
 funciona). El build corre como trabajo asíncrono: `gradle_build` devuelve el id
 al toque y se sigue con `run_esperar(id)`; errores de Kotlin = líneas `e:` del
-out.log del job. Verificado: APK completo de bcipagos (1258 tareas, 5m) dentro
+out.log del job. Verificado: APK completo de un proyecto multi-módulo (1258 tareas, 5m) dentro
 del sandbox.
 
 **Añadido**
@@ -213,7 +213,7 @@ cargar y la verificación en vivo.
 - `buscar_contenido`: parámetros `antes`/`despues` (contexto -B/-A de grep). El
   match llega con su entorno, sin un `leer` posterior. Grupos separados con `--`
   y líneas de contexto con `-` (estilo grep). Sin contexto, formato clásico.
-- `copiar`: forma compacta `origen="local:folil/web/app.py"`,
+- `copiar`: forma compacta `origen="local:miapp/web/app.py"`,
   `destino="wedwed:/srv/…"` (además de los 4 parámetros explícitos). El prefijo
   se toma como lugar solo si es un lugar conocido, así `C:\…` y `/srv/…` no se
   confunden.

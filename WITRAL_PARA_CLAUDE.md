@@ -164,7 +164,7 @@ llamada. Si se quiere a mano: `git_status` -> `git_add` -> `git_diff` -> `git_co
 
 ### Copiar y desplegar entre lugares
 - `copiar(origen, destino, ...)` — copia un archivo entre lugares (SFTP). Forma COMPACTA
-  (recomendada): `origen="local:folil/web/app.py"`, `destino="wedwed:/srv/app/app.py"` (el
+  (recomendada): `origen="local:miapp/web/app.py"`, `destino="wedwed:/srv/app/app.py"` (el
   prefijo antes del `:` es el lugar, solo si es un lugar conocido; asi `C:\...` y `/srv/...`
   no se confunden). Tambien acepta la forma explicita (origen_ruta / origen_lugar /
   destino_lugar / destino_ruta). Hacia un lugar sensible pide `confirmado=True`.
@@ -185,7 +185,7 @@ llamada. Si se quiere a mano: `git_status` -> `git_add` -> `git_diff` -> `git_co
 - `psql_aplicar(donde, ruta_sql, origen, base, confirmado)` — aplica un `.sql`
   (migraciones). Witral LEE el archivo (desde `origen`, por defecto el mismo `donde`) y
   manda el contenido por stdin al psql del lugar de la BASE: sirve para bases detras de
-  tunel cuyo psql no ve el filesystem local (ej. `origen="local"`, `donde="folil_porafuera"`).
+  tunel cuyo psql no ve el filesystem local (ej. `origen="local"`, `donde="dev_porafuera"`).
   Requiere que el lugar tenga config `db`.
 
 ### Puerto serie (generico)
@@ -193,7 +193,7 @@ llamada. Si se quiere a mano: `git_status` -> `git_add` -> `git_diff` -> `git_co
 - `serial_enviar(puerto, texto, baud, bits, paridad, stop, framing, ack, timeout, reintentos, hexa, donde)`
   — envia por el puerto y espera respuesta. **El encuadre es un PARAMETRO, no algo cableado:**
   `framing="crudo"` habla con cualquier equipo por serial (balanza, impresora, placa);
-  `framing="stx_etx_crc16arc"` habla el protocolo del POS BCI (POS Integrado / Cuna) y la
+  `framing="stx_etx_crc16arc"` habla el encuadre tipico de los POS integrados de varios adquirentes y la
   herramienta **calcula el CRC al enviar y lo valida al recibir** — el que llama nunca ve un CRC.
   Se llama `arc` porque "CRC-16" a secas es ambiguo (ARC, MODBUS, CCITT y XMODEM diferen).
   Con `ack=True` acusa recibo con ACK y manda NAK si el CRC vino mal; **el POS espera ese ACK**,
@@ -333,12 +333,12 @@ app **debuggable** (en release no hay acceso).
   Proyectos funciona, AF_UNIX en TMP falla). Fix: `JAVA_TOOL_OPTIONS` con
   `-Djdk.net.unixdomain.tmpdir=<raiz>\.witral\tmpjava` — lo pone `gradle_build`
   automaticamente y el build corre como trabajo asincrono (`run_esperar(id)` para
-  seguirlo). Segundo obstaculo (tambien resuelto): bcipagos fija
+  seguirlo). Segundo obstaculo (tambien resuelto): hay proyectos que fijan
   `kotlin.compiler.execution.strategy=in-process` en gradle.properties, que con
   metaspace 512m muere con OOM; `gradle_build` agrega
   `-Pkotlin.compiler.execution.strategy=daemon` (el daemon de Kotlin usa TCP
   loopback, que funciona bajo el sandbox). VERIFICADO EN VIVO: assembleDevDebug
-  de bcipagos-develop => BUILD SUCCESSFUL en 5m, 1258 tareas, APK generado
+  de un proyecto multi-modulo => BUILD SUCCESSFUL en 5m, 1258 tareas, APK generado
   (app-dev-debug.apk) — el ciclo editar -> compilar -> adb_install -> guion de
   humo queda entero dentro de Witral.
 - **No hay verificacion real de tipos en Kotlin/Java.** `verificar_sintaxis` en `.kt` solo hace
@@ -421,7 +421,7 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
 **SQL y migraciones.**
 - Multi-sentencia en `psql` funciona (stdin, muestra todos los result sets).
 - Migracion con el .sql local contra base detras de tunel:
-  `psql_aplicar(donde="folil_porafuera", origen="local", ruta_sql=..., confirmado=True)`.
+  `psql_aplicar(donde="dev_porafuera", origen="local", ruta_sql=..., confirmado=True)`.
 - Otra base del mismo lugar: parametro `base` (no tocar lugares.json).
 - NO usar psycopg boilerplate: `psql_aplicar` ya lee el archivo y lo manda por stdin.
 
@@ -441,11 +441,12 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
   (`buscar_contenido` sobre `.witral/jobs/<id>/out.log` con patron `^e:`).
 - Despues del build: `adb_install` + logcat/datastore/relanzar, como siempre.
 
-**Consultar Sonar por archivo (bcipagos / SonarCloud).**
+**Consultar Sonar por archivo (SonarCloud).**
 - Tool nativa (desde ronda 11): `sonar_archivo(ruta)` — issues abiertos de ESE archivo,
   formateados (L<linea> [SEVERIDAD] regla: mensaje), ordenados por severidad. Sin `ruta`:
   resumen del proyecto por severidad. `nuevos=True`: solo codigo nuevo. `proyecto` por
-  defecto TRANSFORMAPP2_bcipagos. Solo lectura, sin confirmacion, UNA llamada. El token
+  `proyecto` sale de WITRAL_SONAR_PROYECTO o de systemProp.sonar.projectKey (nunca
+  cableado en el codigo). Solo lectura, sin confirmacion, UNA llamada. El token
   se lee de ~/.gradle/gradle.properties (systemProp.sonar.token, el mismo de gradlew sonar).
 - USO NATURAL: consultar el archivo ANTES de tocarlo (foto de sus issues) y re-consultar
   despues del proximo analisis. Para el usuario en terminal existe el equivalente
@@ -554,10 +555,10 @@ traer los proyectos (`D:\Proyectos` solo tiene `Arduino`, `Videos` y `witral` �
    saber que tiene un archivo antes de tocarlo. Validado en vivo ejecutando red.sonar_issues
    con el python del venv (archivo real: 6 issues; proyecto: 615, 0 criticos).
    PENDIENTE reinicio de Claude Desktop + conversacion nueva para que la tool aparezca.
-2. Contexto del dia (sesion bcipagos): quedo `systemProp.sonar.token` en el
+2. Contexto del dia: quedo `systemProp.sonar.token` en el
    gradle.properties del usuario, el permiso Execute Analysis otorgado en SonarCloud, y
-   la rama feature/perifericos2 con 0 criticos/0 blockers (ver el proyecto Bci para el
-   detalle). Script gemelo para el usuario: `herramientas\sonar_archivo.ps1`.
+   la rama de trabajo con 0 criticos/0 blockers (el detalle, en el canal del
+   proyecto). Script gemelo para el usuario: `herramientas\sonar_archivo.ps1`.
 
 ### Sesion anterior (2026-08-05, ronda 10: feedback de la sesion Kotlin/merge)
 
@@ -630,7 +631,7 @@ RESUELTO (pedido nº1, compilar) — verificacion en vivo post-reinicio:
   Proyectos funcionan — diagnostico con T.java minimo). Fix verificado:
   `-Djdk.net.unixdomain.tmpdir` via JAVA_TOOL_OPTIONS => `gradlew help`
   BUILD SUCCESSFUL dentro del sandbox, y despues el APK COMPLETO:
-  assembleDevDebug de bcipagos-develop en 5m (1258 tareas). Obstaculo 2: el
+  assembleDevDebug de un proyecto multi-modulo en 5m (1258 tareas). Obstaculo 2: el
   proyecto fija kotlin in-process (OOM de metaspace con 512m); fix:
   `-Pkotlin.compiler.execution.strategy=daemon` (TCP loopback, funciona).
   `gradle_build` local Windows quedo cableado como job asincrono con ambos
@@ -674,7 +675,7 @@ propia espera). Fix: el patron viaja en base64 y se decodifica en el shell
 del device (`logcat -e \"$(echo B64 | base64 -d)\" -m 1`), y toda linea de
 adbd se descarta (`_es_eco_adb`) en TODOS los matcheos de Python (barrido,
 bloqueante y fallback) — tambien blinda contra ecos viejos de greps
-manuales. Verificado contra el A920Pro real: base64/$()/-e/-m funcionan.
+manuales. Verificado contra el POS real: base64/$()/-e/-m funcionan.
 MORALEJA generalizable: cualquier matcheo de logcat cuyo patron viaje en la
 linea de comando de adb shell se auto-matchea via el eco de adbd.
 
@@ -688,7 +689,7 @@ venta_calculadora 38s en UNA llamada; venta_dividir ~69s con una pausa
 
 ### Ultima sesion (2026-08-04, ronda 8: guiones de venta en vivo + velocidad)
 
-Se manejo el POS real (cl.bci.bcipagos.dev, A920) de punta a punta. Guiones que
+Se manejo un POS Android real de punta a punta. Guiones que
 FUNCIONAN, guardados en `Proyectos\guiones\`:
 - `venta_rapida.txt` — sin inicio, resultado por logcat. El mas rapido (5 pasos,
   una llamada). Para el dia a dia con la app abierta.
@@ -810,7 +811,7 @@ PENDIENTE reinicio para cargar y verificacion en vivo. Cambios:
 
 PENDIENTE de la sesion (idea de futuro no implementada, esperar propuesta
 concreta): "comandos guardados por proyecto" (`witral suite` que ya sepa cwd,
-venv y timeout de folil) — encaja con la seccion "Idea en carpeta".
+venv y timeout de un proyecto) — encaja con la seccion "Idea en carpeta".
 
 ### Ultima sesion (2026-07-09, ronda 3: buzon asincrono y puentes)
 
@@ -847,7 +848,7 @@ Claude Desktop para que cargue, y la verificacion en vivo:
    `base` en `psql` y `psql_aplicar`.
 2. **psql_aplicar desacoplado**: nuevo parametro `origen` — Witral lee el .sql (de
    cualquier lugar) y lo manda por stdin al psql del lugar de la base. Sirve para el
-   caso folil_porafuera (tunel sin filesystem) sin boilerplate psycopg.
+   caso dev_porafuera (tunel sin filesystem) sin boilerplate psycopg.
 3. **stdin remoto con EOF garantizado** (`shutdown_write` siempre): elimina los cuelgues
    de 4 minutos con comandos remotos que leen stdin. Timeout remoto ahora devuelve 124.
 4. **Respuestas grandes**: `http_request` gano `a_archivo` (guarda el cuerpo en el lugar,
@@ -875,12 +876,12 @@ bien. Por eso la verificacion se hizo en el contenedor de Claude, no con run loc
    gitignoreados; el de `server/` parece residuo — confirmar con el usuario y borrar
    uno para evitar divergencia).
 2. **Verificado en vivo tras reinicio** (esta parte YA ESTA HECHA): psql multi-sentencia
-   muestra todos los result sets contra wedwed y folil_porafuera; UTF-8 intacto en psql
+   muestra todos los result sets contra wedwed y dev_porafuera; UTF-8 intacto en psql
    remoto ("Migración ñü") y en salida de git local (tildes del CHANGELOG bien); el SQL
    por stdin remoto no cuelga (EOF ok); TOFU activo (claves guardadas en la primera
    conexion post-reinicio); firmas nuevas (base/origen/excluir/a_archivo/max_salida)
    registradas. Falta probar en uso real: una migracion con
-   `psql_aplicar(donde="folil_porafuera", origen="local")` y ver un commit con tildes
+   `psql_aplicar(donde="dev_porafuera", origen="local")` y ver un commit con tildes
    en GitHub.
 3. Cuelgues de 4 min del cliente con `run` local + python: CAUSA ENCONTRADA Y CORREGIDA
    (commit `9c12e1a`, carga en el PROXIMO reinicio). subprocess.run tras el timeout mataba
@@ -901,7 +902,7 @@ bien. Por eso la verificacion se hizo en el contenedor de Claude, no con run loc
 
 ## Git local: autenticación GitHub (arreglado 2026-07-07)
 
-El push local a rapiman/folil murió con 401: el remoto HTTPS estaba anclado
+El push local a otro repo propio murió con 401: el remoto HTTPS estaba anclado
 a rapiman@github.com pero el credential manager de Windows solo tenía
 tokens de jprapiman, y la llave SSH histórica de la máquina
 (~/.ssh/id_ed25519) está asociada a la cuenta jprapiman (GitHub responde
@@ -910,12 +911,12 @@ tokens de jprapiman, y la llave SSH histórica de la máquina
 Arreglo definitivo (mismo esquema que wedwed):
 - Llave dedicada ~/.ssh/id_ed25519_rapiman, registrada en la cuenta
   rapiman de GitHub (título "local").
-- El repo folil local quedó: remoto git@github.com:rapiman/folil.git y
+- El repo afectado quedó: remoto git@github.com:rapiman/<repo>.git y
   core.sshCommand "ssh -i C:/Users/jprapiman_transforma/.ssh/id_ed25519_rapiman
   -o IdentitiesOnly=yes" (IdentitiesOnly evita que ofrezca primero la
   llave de jprapiman).
 - La llave vieja id_ed25519 sigue intacta para lo de jprapiman.
-- Si se clona OTRO repo de rapiman en local, repetir el core.sshCommand
+- Si se clona OTRO repo de la misma cuenta en local, repetir el core.sshCommand
   en ese repo (la config es por-repo, a propósito).
 
 En la máquina finoli (2026-08-07) se repitió el esquema con llave PROPIA de

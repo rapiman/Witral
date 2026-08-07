@@ -5,6 +5,44 @@ cliente MCP (como Claude Desktop). Cubre Windows y Linux/macOS.
 
 ---
 
+## 0. Atajo: instalación automática en Windows
+
+El repo incluye `instalar_witral.ps1`, que hace de una vez todo lo que describen
+las secciones siguientes: instala Python y `uv` si faltan, reconstruye el `.git`
+si la carpeta vino de un ZIP, crea el entorno, prueba que el servidor arranque y
+registra Witral en Claude Desktop (con respaldo del config previo). Es
+idempotente: se puede correr las veces que haga falta.
+
+```powershell
+# desde la raíz del repo
+powershell -ExecutionPolicy Bypass -File .\instalar_witral.ps1
+```
+
+Por defecto toma como repo la carpeta donde vive el script, y como raíz del
+lugar `local` la carpeta que lo contiene (si el repo está en `D:\Proyectos\witral`,
+la raíz queda en `D:\Proyectos`). Se puede ajustar:
+
+```powershell
+.\instalar_witral.ps1 -Raiz 'D:\Proyectos' -Nombre 'Tu Nombre' -Email 'tu@correo.com'
+```
+
+| Parámetro | Qué es | Por defecto |
+|---|---|---|
+| `-Repo`   | raíz del repo Witral | la carpeta del script |
+| `-Raiz`   | raíz autorizada del lugar `local` | la carpeta que contiene al repo |
+| `-Url`    | remoto git del proyecto | `https://github.com/rapiman/Witral.git` |
+| `-Nombre` | nombre para los commits | (ninguno) |
+| `-Email`  | email para los commits | (ninguno) |
+
+Lo único que el script **no** puede hacer solo es el reinicio de Claude Desktop
+(paso 7) y agregar tus servidores remotos a `lugares.json` (paso 4): crea uno
+mínimo con solo el lugar `local`.
+
+Si preferís entender cada pieza, o estás en Linux/macOS, seguí las secciones de
+abajo a mano.
+
+---
+
 ## 1. Requisitos
 
 - **Python ≥ 3.10**

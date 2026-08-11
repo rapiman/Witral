@@ -1241,7 +1241,7 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str = "",
 
 @mcp.tool()
 def sonar_archivo(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
-                  nuevos: bool = False) -> str:
+                  nuevos: bool = False, rama: str = "") -> str:
     """
     Issues ABIERTOS de SonarCloud, compactos y ya formateados. Con 'ruta'
     (relativa a la raíz del repo, acepta / o \\): el detalle de ESE archivo
@@ -1250,10 +1250,18 @@ def sonar_archivo(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
     resumen del proyecto por severidad. 'nuevos'=True: solo código nuevo
     (leak period). El token se lee de ~/.gradle/gradle.properties
     (systemProp.sonar.token, el mismo de `gradlew sonar`). Solo lectura.
+
+    'rama': la rama de SonarCloud a consultar. SIN ESTE PARAMETRO SE
+    RESPONDE POR LA RAMA POR DEFECTO del proyecto, que casi nunca es la que
+    uno acaba de analizar. Si el análisis se subió con
+    `gradle_build(proyecto, "sonar -Dsonar.branch.name=<rama>")`, hay que
+    pasar aquí esa MISMA rama o los números van a ser de otra cosa. La
+    salida siempre dice a qué rama corresponde.
+
     OJO: refleja el ÚLTIMO análisis subido, no el working tree — tras
     editar, refrescar con gradle_build(proyecto, "sonar") (~5 min).
     """
-    return R.sonar_issues(ruta, proyecto, nuevos)
+    return R.sonar_issues(ruta, proyecto, nuevos, rama)
 
 
 @mcp.tool()

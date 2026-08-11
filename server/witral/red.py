@@ -191,7 +191,7 @@ _SONAR_ORDEN = {"BLOCKER": 0, "CRITICAL": 1, "MAJOR": 2, "MINOR": 3, "INFO": 4}
 
 
 def sonar_issues(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
-                 nuevos: bool = False,
+                 nuevos: bool = False, rama: str = "",
                  host: str = "https://sonarcloud.io") -> str:
     """
     Issues ABIERTOS en SonarCloud, formateados compactos (sin JSON crudo).
@@ -201,6 +201,13 @@ def sonar_issues(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
     Sin 'ruta': resumen del proyecto por severidad. 'nuevos'=True acota al
     código nuevo (leak period). Solo lectura; refleja el ÚLTIMO análisis
     subido, no el working tree.
+
+    'rama' consulta esa rama de SonarCloud en vez de la rama por defecto del
+    proyecto. Agregado 2026-08-11: sin esto la tool respondía SIEMPRE por la
+    rama principal, y como el análisis de una rama de trabajo se sube con
+    `-Dsonar.branch.name=<rama>`, uno miraba números que no tenían nada que
+    ver con lo que acababa de analizar — sin ninguna señal de que estaba
+    leyendo otra cosa. Pasó en vivo con release/v2.4.0-rc1.
     """
     import json as _json
     import urllib.error
@@ -219,6 +226,9 @@ def sonar_issues(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
               "facets": "severities"}
     if nuevos:
         params["sinceLeakPeriod"] = "true"
+    rama_norm = (rama or "").strip()
+    if rama_norm:
+        params["branch"] = rama_norm
     url = f"{host}/api/issues/search?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url)
     req.add_header("Authorization", f"Bearer {token}")
@@ -234,6 +244,10 @@ def sonar_issues(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
 
     total = data.get("total", 0)
     alcance = " (solo código nuevo)" if nuevos else ""
+    # La rama SIEMPRE se dice en la salida, incluso cuando no se pidió: quien
+    # lee tiene que saber a qué rama corresponden los números que está viendo.
+    # Ese fue justamente el problema que motivó el parámetro.
+    alcance += f" [rama {rama_norm}]" if rama_norm else " [rama por defecto]"
 
     if not ruta_norm:
         sev: dict = {}

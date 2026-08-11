@@ -15,7 +15,7 @@ Objetivo: un cambio de esquema/datos hecho en local llega y se aplica en un serv
    del lugar de la base (no hace falta copiar el `.sql` primero):
    - Base local del server: `psql_aplicar(donde="<server>", ruta_sql=..., origen="<server>", confirmado=True)`.
    - Base detrás de túnel cuyo psql no ve el filesystem local: dejar el `.sql` en
-     local y `psql_aplicar(donde="folil_porafuera", origen="local", ruta_sql=..., confirmado=True)`.
+     local y `psql_aplicar(donde="dev_porafuera", origen="local", ruta_sql=..., confirmado=True)`.
 3. **Verificar** — `psql(donde="<server>", "\dt")` o un `SELECT` de control (lectura
    libre). Con `base="<otra>"` se apunta a otra base del mismo lugar.
 4. **Repetir** en el siguiente entorno. En lugares **sensibles** (prod): mostrar el
@@ -34,7 +34,7 @@ Notas:
 Camino corto con `desplegar` (copiar → restart → esperar → curl de humo en una
 llamada):
 
-- `desplegar(origen="local:folil/web/app.py", destino="folil:/srv/app/app.py", servicio="<servicio>", prueba_url="http://127.0.0.1:8000/health", confirmado=True)`
+- `desplegar(origen="local:miapp/web/app.py", destino="dev:/srv/app/app.py", servicio="<servicio>", prueba_url="http://127.0.0.1:8000/health", confirmado=True)`
 
 El servicio y la prueba de humo corren en el lugar de destino (la `prueba_url` puede
 apuntar a localhost del server, porque el curl sale desde ahí). Si un paso falla,
@@ -105,7 +105,7 @@ Un `.txt` con un verbo por línea. Barato cuando pasa (una línea); ante el prim
 fallo devuelve captura + textos de pantalla + logcat. Ejemplo:
 
 ```
-paquete    com.transformapp.pos
+paquete    com.ejemplo.pos
 inicio                          # estado conocido: logcat 16M/limpio, force-stop + relanzar
 tap        Abrir menú principal
 esperar    Menú Comercio
@@ -116,7 +116,7 @@ no_debe    Error
 atras
 ```
 
-Correr con `adb_guion(serial, "ruta/humo.txt", paquete="com.transformapp.pos")`.
+Correr con `adb_guion(serial, "ruta/humo.txt", paquete="com.ejemplo.pos")`.
 Guiones largos se pausan y devuelven `seguí con desde=K`. Un `tap` a un texto de la
 lista negra (cierre de turno, anulación, borrar llaves...) se niega salvo que el
 guión traiga `permitir <texto>` antes.
@@ -144,7 +144,7 @@ guión traiga `permitir <texto>` antes.
 Un flujo completo (monto → propina → pago) con el resultado asegurado por logcat:
 
 ```
-paquete    cl.bci.bcipagos.dev
+paquete    com.ejemplo.pos.dev
 limpiar_log                     # logcat -G 16M + -c, rápido (sin el force-stop de inicio)
 escribir   4730+Continuar       # teclea el monto y toca Continuar (misma pantalla, 1 volcado)
 tap        10%+Continuar        # dos taps encadenados

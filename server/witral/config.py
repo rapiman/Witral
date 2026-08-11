@@ -43,21 +43,63 @@ class SSHConfig:
     passphrase: str | None = None     # passphrase de la clave, si la tiene
 
 
+# Motores soportados y sus valores por defecto (cliente nativo y puerto).
+MOTORES = {
+    "postgres": {"cliente": "psql", "puerto": 5432},
+    "sqlserver": {"cliente": "sqlcmd", "puerto": 1433},
+    "oracle": {"cliente": "sqlplus", "puerto": 1521},
+}
+
+# Alias frecuentes -> nombre canónico del motor.
+_ALIAS_MOTOR = {
+    "postgres": "postgres", "postgresql": "postgres", "pg": "postgres",
+    "psql": "postgres",
+    "sqlserver": "sqlserver", "mssql": "sqlserver", "sql server": "sqlserver",
+    "sql-server": "sqlserver", "sqlcmd": "sqlserver", "tsql": "sqlserver",
+    "oracle": "oracle", "ora": "oracle", "sqlplus": "oracle",
+}
+
+
+def normalizar_motor(valor: str | None) -> str:
+    """Nombre canónico del motor. Desconocido => error claro, no silencio."""
+    if not valor:
+        return "postgres"
+    m = _ALIAS_MOTOR.get(str(valor).strip().lower())
+    if m is None:
+        raise ConfigError(
+            f"Motor de base desconocido: '{valor}'. "
+            f"Soportados: {', '.join(sorted(MOTORES))}."
+        )
+    return m
+
+
 @dataclass
 class DBConfig:
+    # "postgres" | "sqlserver" | "oracle". Decide qué cliente nativo se invoca
+    # y cómo se arman sus argumentos (ver basedatos.py).
     motor: str = "postgres"
     host: str = "127.0.0.1"           # local para el lugar
     puerto: int = 5432
     base: str | None = None
     usuario: str | None = None
     password: str | None = None
-    # Cómo invocar el cliente en ese lugar; por defecto "psql".
+    # Cómo invocar el cliente en ese lugar; por defecto, el del motor.
     cliente: str = "psql"
     # Autenticación "peer" (socket local + usuario del sistema): si se define,
     # el comando se ejecuta como `sudo -u <como> psql ...` y se omiten -h/-U
     # (psql conecta por socket Unix como ese usuario del SO). Para bases que no
     # usan password TCP, p. ej. un postgres de dev con peer auth. Solo remoto/unix.
+    # SOLO postgres.
     como: str | None = None
+    # --- Específicos de SQL Server ---
+    # Instancia con nombre: el -S queda "host\instancia" (y el puerto, si se
+    # declaró explícito, se agrega como "host\instancia,puerto").
+    instancia: str | None = None
+    # Autenticación integrada de Windows (-E): sin usuario/password.
+    integrada: bool = False
+    # TLS: cifrar la conexión (-N) y confiar en un certificado autofirmado (-C).
+    cifrar: bool = False
+    confiar_cert: bool = False
 
 
 @dataclass
@@ -130,15 +172,24 @@ def _parse_ssh(d: dict) -> SSHConfig:
 
 
 def _parse_db(d: dict) -> DBConfig:
+    motor = normalizar_motor(d.get("motor"))
+    predet = MOTORES[motor]
     return DBConfig(
-        motor=d.get("motor", "postgres"),
+        motor=motor,
         host=d.get("host", "127.0.0.1"),
-        puerto=int(d.get("puerto", 5432)),
+        # El puerto por defecto sale del MOTOR, no de postgres siempre.
+        puerto=int(d.get("puerto", predet["puerto"])),
         base=d.get("base"),
         usuario=d.get("usuario"),
         password=d.get("password"),
-        cliente=d.get("cliente", "psql"),
+        # Igual el cliente: psql / sqlcmd / sqlplus según motor, salvo que la
+        # config declare una ruta o nombre propio.
+        cliente=d.get("cliente", predet["cliente"]),
         como=d.get("como"),
+        instancia=d.get("instancia"),
+        integrada=bool(d.get("integrada", False)),
+        cifrar=bool(d.get("cifrar", False)),
+        confiar_cert=bool(d.get("confiar_cert", False)),
     )
 
 
@@ -290,7 +341,9 @@ def cargar() -> Config:
             for nombre, d in (data.get("lugares", {}) or {}).items():
                 try:
                     lugares[nombre] = _parse_lugar(nombre, d)
-                except (KeyError, TypeError, ValueError) as e:
+                except (KeyError, TypeError, ValueError, ConfigError) as e:
+                    # ConfigError incluida: un motor de base desconocido rompe
+                    # SOLO ese lugar, no la carga entera (fail-soft por lugar).
                     rotos.append(f"lugar '{nombre}': {e}")
             for nombre, d in (data.get("identidades", {}) or {}).items():
                 try:

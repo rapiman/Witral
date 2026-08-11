@@ -462,7 +462,7 @@ def copiar(origen: str = "", destino: str = "", origen_ruta: str = "",
     """
     Copia un archivo entre dos lugares (SFTP). Dos formas de indicar los extremos:
 
-    - COMPACTA (recomendada): origen="local:folil/web/app.py",
+    - COMPACTA (recomendada): origen="local:miapp/web/app.py",
       destino="wedwed:/srv/app/app.py". El prefijo antes del ':' es el lugar
       (debe ser un lugar conocido; si no hay prefijo de lugar válido —p. ej.
       'C:\\...' o '/srv/...'— se asume el lugar 'local' y todo es la ruta).
@@ -509,7 +509,7 @@ def desplegar(origen: str, destino: str, servicio: str = "",
     (copiar -> restart -> esperar -> curl) en una sola llamada.
 
     origen/destino: forma compacta 'lugar:ruta' (como copiar). Ej.:
-      origen="local:folil/web/app.py", destino="folil:/srv/app/app.py".
+      origen="local:miapp/web/app.py", destino="dev:/srv/app/app.py".
       El servicio y la prueba de humo corren en el lugar de DESTINO.
     servicio: servicio a reiniciar en el destino (vacío = no reinicia).
     prueba_url: si se da, tras 'espera' segundos hace GET y reporta el status
@@ -524,7 +524,7 @@ def desplegar(origen: str, destino: str, servicio: str = "",
     destino_lugar, destino_ruta = CP.partir_lugar_ruta(destino, _cfg.nombres)
     if not origen_ruta or not destino_lugar or not destino_ruta:
         return ("Faltan datos. Usá origen=\"lugar:ruta\" y destino=\"lugar:ruta\" "
-                "(ej. destino=\"folil:/srv/app/app.py\").")
+                "(ej. destino=\"dev:/srv/app/app.py\").")
     d, aviso = _resolver(destino_lugar)
     if aviso:
         return aviso
@@ -814,19 +814,40 @@ def servicio(accion: str, nombre: str, donde: str = "local",
     return _fmt(S.servicio(lg, accion, nombre))
 
 
-# --- Base de datos (psql en un lugar) --------------------------------------
+# --- Base de datos (cliente nativo del motor, en un lugar) -----------------
+
+@mcp.tool()
+def sql(donde: str, comando: str, confirmado: bool = False,
+        base: str = "") -> str:
+    """
+    Corre SQL en la base de un lugar, con el CLIENTE NATIVO del motor que
+    declare ese lugar: postgres -> psql, sqlserver -> sqlcmd. El motor sale de
+    la config (`db.motor`), así que la tool es la misma para los dos.
+
+    Con VARIAS sentencias en una llamada se muestran TODOS los result sets.
+    Lectura libre; las sentencias destructivas (UPDATE/DELETE/DROP/TRUNCATE/
+    ALTER/INSERT/CREATE/MERGE/EXEC/BACKUP/RESTORE) requieren confirmado=True.
+    En un lugar NO sensible con bloque MIXTO, las LECTURAS corren al toque y la
+    confirmación se pide solo por las ESCRITURAS. En lugares sensibles,
+    cualquier ejecución pide confirmación.
+    'base': nombre de base alternativa del mismo lugar (override del -d).
+    """
+    return _correr_sql(donde, comando, confirmado, base)
+
 
 @mcp.tool()
 def psql(donde: str, comando: str, confirmado: bool = False,
          base: str = "") -> str:
     """
-    Corre psql en un lugar (la base es local allí). El SQL viaja por stdin:
-    con VARIAS sentencias en una llamada se muestran TODOS los result sets
-    (ya no solo el último). Lectura libre; sentencias destructivas
-    (UPDATE/DELETE/DROP/TRUNCATE/ALTER/INSERT/CREATE) requieren
-    confirmado=True. En lugares sensibles, cualquier ejecución pide confirmación.
-    'base': nombre de base alternativa del mismo lugar (override del -d).
+    Alias histórico de `sql` (cuando Witral solo hablaba postgres). Mismo
+    comportamiento exacto; en lugares con motor sqlserver corre sqlcmd igual.
+    Para código nuevo, preferir `sql`.
     """
+    return _correr_sql(donde, comando, confirmado, base)
+
+
+def _correr_sql(donde: str, comando: str, confirmado: bool,
+                base: str) -> str:
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
@@ -871,8 +892,9 @@ def psql_aplicar(donde: str, ruta_sql: str, confirmado: bool = False,
                  origen: str = "", base: str = "") -> str:
     """
     Aplica un archivo .sql en la base de 'donde' (caso central de migración).
-    Witral LEE el .sql y lo manda por STDIN al psql del lugar de la BASE, así
-    que "dónde está el archivo" y "dónde corre psql" quedan desacoplados:
+    Witral LEE el .sql y se lo entrega al cliente nativo del motor de ese lugar
+    (psql o sqlcmd), así que "dónde está el archivo" y "dónde corre el cliente"
+    quedan desacoplados:
     - 'origen': lugar donde vive el .sql (por defecto, el mismo 'donde').
       Ej.: origen="local" aplica un .sql local contra una base detrás de
       túnel cuyo psql no ve el filesystem local.
@@ -1240,7 +1262,7 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str = "",
 
 
 @mcp.tool()
-def sonar_archivo(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
+def sonar_archivo(ruta: str = "", proyecto: str = "",
                   nuevos: bool = False, rama: str = "") -> str:
     """
     Issues ABIERTOS de SonarCloud, compactos y ya formateados. Con 'ruta'
@@ -1250,13 +1272,15 @@ def sonar_archivo(ruta: str = "", proyecto: str = "TRANSFORMAPP2_bcipagos",
     resumen del proyecto por severidad. 'nuevos'=True: solo código nuevo
     (leak period). El token se lee de ~/.gradle/gradle.properties
     (systemProp.sonar.token, el mismo de `gradlew sonar`). Solo lectura.
+    'proyecto' vacío => WITRAL_SONAR_PROYECTO o systemProp.sonar.projectKey
+    del mismo gradle.properties.
 
-    'rama': la rama de SonarCloud a consultar. SIN ESTE PARAMETRO SE
-    RESPONDE POR LA RAMA POR DEFECTO del proyecto, que casi nunca es la que
-    uno acaba de analizar. Si el análisis se subió con
+    'rama': la rama de SonarCloud a consultar. SIN ESTE PARAMETRO SE RESPONDE
+    POR LA RAMA POR DEFECTO del proyecto, que casi nunca es la que uno acaba
+    de analizar. Si el análisis se subió con
     `gradle_build(proyecto, "sonar -Dsonar.branch.name=<rama>")`, hay que
-    pasar aquí esa MISMA rama o los números van a ser de otra cosa. La
-    salida siempre dice a qué rama corresponde.
+    pasar aquí esa MISMA rama o los números van a ser de otra cosa. La salida
+    siempre dice a qué rama corresponde.
 
     OJO: refleja el ÚLTIMO análisis subido, no el working tree — tras
     editar, refrescar con gradle_build(proyecto, "sonar") (~5 min).
@@ -1440,8 +1464,9 @@ def serial_enviar(puerto: str, texto: str, baud: int = 9600, bits: int = 8,
         cualquier equipo que hable por serial (balanza, impresora, módem, placa).
       - framing="stx_etx_crc16arc": encuadre STX+payload+ETX+CRC16. La
         herramienta CALCULA el CRC al enviar y lo VALIDA al recibir; el que
-        llama nunca ve un CRC. Es el protocolo del POS BCI en modo POS
-        Integrado / Cuna. Se llama 'arc' porque "CRC-16" a secas es ambiguo
+        llama nunca ve un CRC. Es el encuadre típico de los protocolos de
+        POS integrado de varios adquirentes. Se llama 'arc' porque
+        "CRC-16" a secas es ambiguo
         (ARC, MODBUS, CCITT y XMODEM difieren); este es ARC, poly 0xA001.
 
     'ack'=True (solo con encuadre) acusa recibo con ACK cuando el CRC da bien y

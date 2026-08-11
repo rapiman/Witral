@@ -174,14 +174,28 @@ llamada. Si se quiere a mano: `git_status` -> `git_add` -> `git_diff` -> `git_co
   Requiere `confirmado=True` (escribe en server + reinicia servicio); corta y reporta si un
   paso falla.
 
-### Base de datos (psql en un lugar)
-- `psql(donde, comando, base)` — consulta/sentencia sobre la base del lugar. El SQL viaja
-  por **stdin**: con varias sentencias en una llamada se muestran TODOS los result sets
-  (ya no solo el ultimo). `base` apunta a otra base del mismo lugar (override del -d).
+### Base de datos (cliente nativo del motor, en un lugar)
+El MOTOR es un eje mas, igual que `donde`: sale de la config del lugar (`db.motor`) y
+decide que cliente nativo se invoca. Soportados: **postgres** (`psql`) y **sqlserver**
+(`sqlcmd`). `oracle` esta reservado (`sqlplus`) pero aun NO implementado: da error claro.
+- `sql(donde, comando, base)` — consulta/sentencia sobre la base del lugar, con el
+  cliente que corresponda al motor. Con varias sentencias en una llamada se muestran
+  TODOS los result sets. `base` apunta a otra base del mismo lugar (override del -d).
   En lugar NO sensible con bloque MIXTO (SELECT + UPDATE), sin `confirmado` corre las
   LECTURAS al toque y pide confirmacion solo por las ESCRITURAS (se acabo el doble viaje
-  por un SELECT escondido). Ante caida de conexion (WinError 10054), reintenta una vez
-  SOLO las lecturas.
+  por un SELECT escondido). Ante caida de conexion (WinError 10054, communication link
+  failure), reintenta una vez SOLO las lecturas.
+- `psql(...)` — alias historico de `sql`, comportamiento identico. Para codigo nuevo,
+  preferir `sql`.
+- Destructivo = UPDATE/DELETE/DROP/TRUNCATE/ALTER/INSERT/CREATE/GRANT/REVOKE y, para
+  T-SQL, tambien MERGE/EXEC/EXECUTE/BACKUP/RESTORE. Un `EXEC` inofensivo pide
+  confirmacion de mas: sale mas barato que escribir de menos.
+- Una base SQL Server alcanzable por RED (VPN/LAN) se modela como un lugar **local** con
+  bloque `db` apuntando al host: el cliente corre en esta maquina. No hace falta SSH.
+- OJO sqlcmd: **ignora la codepage de entrada cuando el SQL va por stdin** y destroza el
+  no-ASCII (una `ñ` entra rota y queda rota EN LA BASE). Por eso en local Windows Witral
+  deja el SQL en un temporal UTF-8 con BOM bajo `<raiz>\.witral\tmp\`, lo pasa con `-i` y
+  lo borra despues. No "arreglar" esto volviendo a stdin.
 - `psql_aplicar(donde, ruta_sql, origen, base, confirmado)` — aplica un `.sql`
   (migraciones). Witral LEE el archivo (desde `origen`, por defecto el mismo `donde`) y
   manda el contenido por stdin al psql del lugar de la BASE: sirve para bases detras de
@@ -320,6 +334,7 @@ app **debuggable** (en release no hay acceso).
 | Copiar entre lugares (forma compacta)        | `copiar(origen="l:ruta", destino=…)`  |
 | Ver/resolver conflictos de merge             | `git_conflictos` / `git_resolver`     |
 | Compilar Android en local Windows            | `gradle_build` -> `run_esperar(id)`   |
+| Consultar una base (cualquier motor)         | `sql(donde, comando)`                 |
 | Comando arbitrario (ultimo recurso)          | `run` (siempre confirmado)            |
 
 ---
@@ -494,7 +509,29 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
 
 ## 7. ESTADO Y PENDIENTES (para retomar desde otra conversacion)
 
-### Ultima sesion (2026-08-07, ronda 12: instalacion en la maquina finoli)
+### Ultima sesion (2026-08-11, ronda 13: motor sqlserver + lugares SAAM/EAM)
+
+Witral pasa de "solo postgres" a "el motor es un eje". Detalle completo en el
+CHANGELOG (ronda 13). Resumen operativo:
+
+- Tool nueva `sql(donde, comando, confirmado, base)`; `psql` sigue como alias.
+- Motor `sqlserver` via `sqlcmd` (ya venia instalado en finoli con las ODBC 170
+  Tools). No hay cliente Oracle en la maquina y `oracle` NO esta implementado.
+- Lugares nuevos, todos locales (el cliente corre aca, la base esta detras de la
+  VPN): `saam` -> INFORDES (desarrollo), `saam_qas` -> INFORQAS y `saam_rep` ->
+  INFORREP, estos dos marcados `sensible` para que toda escritura pida
+  confirmacion. Mismo servidor SQL Server 2017.
+- Contexto del trabajo: Infor EAM (hoy Hexagon EAM), el sistema de mantenimiento.
+  El esquema `dbo` tiene 1.901 tablas, 1.239 con prefijo `R5`. Las ordenes de
+  trabajo NO estan en una tabla `R5WORKORDERS`: viven en `R5EVENTS` (herencia de
+  Datastream 7i).
+- VERIFICADO contra la base real corriendo `basedatos.py` con el venv: lectura
+  multi-sentencia, acentos intactos, error de SQL que corta el lote con codigo 1,
+  heuristica de destructivo, override de `base`, y limpieza del temporal.
+- PENDIENTE: reinicio completo de Claude Desktop + conversacion nueva para que
+  aparezca la tool `sql`.
+
+### Sesion anterior (2026-08-07, ronda 12: instalacion en la maquina finoli)
 
 Witral instalado y andando en una SEGUNDA maquina (`finoli`, usuario Windows
 `insan`), con el repo en `D:\Proyectos\witral` y la raiz del lugar local en

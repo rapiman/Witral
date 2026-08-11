@@ -7,6 +7,47 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 13 — el motor de base es un eje: SQL Server además de PostgreSQL
+
+Hasta acá Witral solo hablaba PostgreSQL: `basedatos.py` estaba cableado a
+`psql` y el campo `motor` de `DBConfig` era decorativo. Ahora el motor es un eje
+de la config del lugar, igual que `donde` es el eje de máquina.
+
+**Añadido**
+- `sql(donde, comando, confirmado, base)` — misma tool para cualquier motor;
+  corre el cliente nativo que declare el lugar. `psql` queda como alias con
+  comportamiento idéntico (nada de lo existente se rompe).
+- Motor **`sqlserver`** vía `sqlcmd`: `-S host[\instancia][,puerto]`,
+  autenticación SQL (`-U` + password por entorno) o integrada de Windows
+  (`-E`), TLS opcional (`cifrar` → `-N`, `confiar_cert` → `-C`).
+- `DBConfig` gana `instancia`, `integrada`, `cifrar`, `confiar_cert`;
+  `normalizar_motor()` acepta alias (`mssql`, `postgresql`, `pg`, …) y falla con
+  mensaje claro ante un motor desconocido.
+- Los defaults de `cliente` y `puerto` salen del MOTOR (psql/5432,
+  sqlcmd/1433, sqlplus/1521), no de postgres siempre.
+
+**Corregido / endurecido**
+- La heurística `es_destructivo` cubre T-SQL: `MERGE`, `EXEC`/`EXECUTE`,
+  `BACKUP`, `RESTORE`. Un `EXEC` inofensivo pide confirmación de más; el costo
+  es mucho menor que el de escribir de menos.
+- La detección de caída de CONEXIÓN (que habilita el reintento único de una
+  lectura) es por motor: los mensajes del driver ODBC no se parecen en nada a
+  los de psql.
+- Un motor desconocido rompe SOLO ese lugar, no la carga entera de la config
+  (`ConfigError` sumada al fail-soft por lugar de `cargar()`).
+- La salida de `sqlcmd` (que emite CR CR LF) se normaliza antes de devolverla.
+
+**Hallazgo de campo (por qué el SQL de SQL Server NO va por stdin)**
+`sqlcmd` **ignora la codepage de entrada** (`-f i:65001`) cuando el SQL llega
+por stdin: lo lee como OEM y destroza el no-ASCII — una `ñ` entra como dos
+caracteres basura y termina así EN LA BASE. Probado contra SQL Server 2017 con
+UTF-8 pelado, UTF-8 con BOM y UTF-16LE con BOM por stdin: los tres fallan (los
+dos con BOM ni siquiera parsean). Con `-i archivo` sí respeta el `-f`. Por eso,
+en un lugar local Windows con motor sqlserver, Witral deja el SQL en un archivo
+temporal UTF-8 con BOM bajo `<raíz>\.witral\tmp\`, lo pasa con `-i` y lo borra
+en un `finally`. En unix el `sqlcmd` lee UTF-8 de stdin sin problema y se
+mantiene el camino de siempre.
+
 ### Ronda 10 — feedback Kotlin/merge: conflictos, PIN, aleatorios y COMPILAR
 
 **El grande: `gradle_build` compila en local Windows.** El histórico

@@ -38,6 +38,38 @@
         "web": "/var/www/html"
       }
     },
+    "_comentario_sqlserver": [
+      "Una base SQL Server alcanzable por RED (VPN/LAN) desde ESTA maquina se",
+      "modela como un lugar LOCAL con bloque db: el cliente (sqlcmd) corre aca",
+      "y db.host apunta al servidor. Motor: sqlserver | postgres | oracle.",
+      "Opcionales de sqlserver: instancia (host\\\\INSTANCIA), integrada (auth de",
+      "Windows, sin usuario/password), cifrar (-N), confiar_cert (-C)."
+    ],
+    "erp": {
+      "local": true,
+      "so": "windows",
+      "raiz": "D:\\\\Proyectos",
+      "db": {
+        "motor": "sqlserver",
+        "host": "10.0.0.10",
+        "puerto": 1433,
+        "base": "MIBASE",
+        "usuario": "miusuario",
+        "password": "sisa-en-este-archivo-que-esta-gitignoreado"
+      }
+    },
+    "erp_prod": {
+      "local": true,
+      "so": "windows",
+      "raiz": "D:\\\\Proyectos",
+      "sensible": true,
+      "db": {
+        "motor": "sqlserver",
+        "host": "10.0.0.10",
+        "base": "MIBASE_PROD",
+        "integrada": true
+      }
+    },
     "prod": {
       "sensible": true,
       "ssh": {

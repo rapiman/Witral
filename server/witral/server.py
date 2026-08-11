@@ -814,19 +814,40 @@ def servicio(accion: str, nombre: str, donde: str = "local",
     return _fmt(S.servicio(lg, accion, nombre))
 
 
-# --- Base de datos (psql en un lugar) --------------------------------------
+# --- Base de datos (cliente nativo del motor, en un lugar) -----------------
+
+@mcp.tool()
+def sql(donde: str, comando: str, confirmado: bool = False,
+        base: str = "") -> str:
+    """
+    Corre SQL en la base de un lugar, con el CLIENTE NATIVO del motor que
+    declare ese lugar: postgres -> psql, sqlserver -> sqlcmd. El motor sale de
+    la config (`db.motor`), así que la tool es la misma para los dos.
+
+    Con VARIAS sentencias en una llamada se muestran TODOS los result sets.
+    Lectura libre; las sentencias destructivas (UPDATE/DELETE/DROP/TRUNCATE/
+    ALTER/INSERT/CREATE/MERGE/EXEC/BACKUP/RESTORE) requieren confirmado=True.
+    En un lugar NO sensible con bloque MIXTO, las LECTURAS corren al toque y la
+    confirmación se pide solo por las ESCRITURAS. En lugares sensibles,
+    cualquier ejecución pide confirmación.
+    'base': nombre de base alternativa del mismo lugar (override del -d).
+    """
+    return _correr_sql(donde, comando, confirmado, base)
+
 
 @mcp.tool()
 def psql(donde: str, comando: str, confirmado: bool = False,
          base: str = "") -> str:
     """
-    Corre psql en un lugar (la base es local allí). El SQL viaja por stdin:
-    con VARIAS sentencias en una llamada se muestran TODOS los result sets
-    (ya no solo el último). Lectura libre; sentencias destructivas
-    (UPDATE/DELETE/DROP/TRUNCATE/ALTER/INSERT/CREATE) requieren
-    confirmado=True. En lugares sensibles, cualquier ejecución pide confirmación.
-    'base': nombre de base alternativa del mismo lugar (override del -d).
+    Alias histórico de `sql` (cuando Witral solo hablaba postgres). Mismo
+    comportamiento exacto; en lugares con motor sqlserver corre sqlcmd igual.
+    Para código nuevo, preferir `sql`.
     """
+    return _correr_sql(donde, comando, confirmado, base)
+
+
+def _correr_sql(donde: str, comando: str, confirmado: bool,
+                base: str) -> str:
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
@@ -871,8 +892,9 @@ def psql_aplicar(donde: str, ruta_sql: str, confirmado: bool = False,
                  origen: str = "", base: str = "") -> str:
     """
     Aplica un archivo .sql en la base de 'donde' (caso central de migración).
-    Witral LEE el .sql y lo manda por STDIN al psql del lugar de la BASE, así
-    que "dónde está el archivo" y "dónde corre psql" quedan desacoplados:
+    Witral LEE el .sql y se lo entrega al cliente nativo del motor de ese lugar
+    (psql o sqlcmd), así que "dónde está el archivo" y "dónde corre el cliente"
+    quedan desacoplados:
     - 'origen': lugar donde vive el .sql (por defecto, el mismo 'donde').
       Ej.: origen="local" aplica un .sql local contra una base detrás de
       túnel cuyo psql no ve el filesystem local.

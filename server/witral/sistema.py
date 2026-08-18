@@ -46,7 +46,7 @@ def servicio(lugar: Lugar, accion: str, nombre: str) -> T.Resultado:
     """Controla un servicio: status | start | stop | restart."""
     accion = accion.lower()
     if accion not in _ACCIONES:
-        return T.Resultado(2, "", f"acción inválida: {accion}. Usá: {', '.join(sorted(_ACCIONES))}")
+        return T.Resultado(2, "", f"acción inválida: {accion}. Usar: {', '.join(sorted(_ACCIONES))}")
     if lugar.es_windows:
         if accion == "restart":
             r1 = T.ejecutar(lugar, f'sc stop "{nombre}"')

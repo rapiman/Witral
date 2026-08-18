@@ -42,7 +42,7 @@ def adb_logcat(lugar: Lugar, serial: str, tags: str = "", nivel: str = "V",
     """
     if limpiar_antes:
         T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-c"])
-        return T.Resultado(0, "logcat limpiado. Reproducí el caso y volvé a "
+        return T.Resultado(0, "logcat limpiado. Reproducir el caso y volver a "
                               "llamar adb_logcat sin limpiar_antes para capturar.", "")
     args = ["adb", "-s", serial, "logcat", "-d"]
     if tags:
@@ -72,7 +72,8 @@ def _adb_modelo(lugar: Lugar, serial: str) -> str | None:
         return None
 
 
-def adb_install(lugar: Lugar, serial: str, apk: str, reemplazar: bool = True) -> T.Resultado:
+def adb_install(lugar: Lugar, serial: str, apk: str, reemplazar: bool = True,
+                permitir_downgrade: bool = False) -> T.Resultado:
     # Normalizar el APK como las tools de archivo: acepta ruta relativa (la
     # resuelve contra la raíz del lugar) o absoluta, y la acota a la raíz. Así
     # adb recibe siempre una ruta absoluta y no falla por interpretarla desde
@@ -81,14 +82,128 @@ def adb_install(lugar: Lugar, serial: str, apk: str, reemplazar: bool = True) ->
     args = ["adb", "-s", serial, "install"]
     if reemplazar:
         args.append("-r")
+    if permitir_downgrade:
+        args.append("-d")
     args.append(apk_abs)
     r = T.ejecutar(lugar, args, timeout=300)
     # Encabezar con modelo + serial: entre pruebas el POS puede cambiar de serial
     # y eso explica params/estado inesperados; que la respuesta lo deje claro.
     modelo = _adb_modelo(lugar, serial)
     quien = f"{modelo} (serial {serial})" if modelo else f"serial {serial}"
-    return T.Resultado(r.codigo, f"Dispositivo: {quien}\n{r.salida or ''}".rstrip(),
-                       r.error)
+    salida = f"Dispositivo: {quien}\n{r.salida or ''}".rstrip()
+    error = r.error
+    salida += _diagnostico_install(lugar, serial, apk, r, permitir_downgrade)
+    return T.Resultado(r.codigo, salida, error)
+
+
+# Fallos de install cuya causa real no se deduce del mensaje de adb. La
+# traducción va en la MISMA respuesta: leer "INSTALL_FAILED_VERSION_DOWNGRADE"
+# no dice que el problema es la build que ya está en el equipo.
+def _diagnostico_install(lugar: Lugar, serial: str, apk: str,
+                         r: T.Resultado, ya_downgrade: bool) -> str:
+    texto = f"{r.salida or ''}\n{r.error or ''}"
+    if "INSTALL_FAILED_VERSION_DOWNGRADE" in texto:
+        extra = ""
+        if not ya_downgrade:
+            extra = ("\nReintentar con permitir_downgrade=True (agrega -d) para "
+                     "instalar igual sin desinstalar la app ni perder sus datos.")
+        return ("\n\nCAUSA: en el equipo hay instalada una build con versionCode "
+                "MAYOR que la del APK. Android rechaza el downgrade aunque el "
+                "versionName parezca el mismo, porque compara versionCode."
+                + extra +
+                "\nPara ver qué está instalado: adb_estado_app(serial, paquete).")
+    if "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in texto:
+        return ("\n\nCAUSA: la app instalada está firmada con otra clave (típico "
+                "entre una build de release y una de debug). No hay flag que lo "
+                "salte: hay que desinstalar la existente, lo que borra sus datos.")
+    if "INSTALL_FAILED_INSUFFICIENT_STORAGE" in texto:
+        return "\n\nCAUSA: no hay espacio en el dispositivo."
+    if "device unauthorized" in texto or "unauthorized" in texto:
+        return ("\n\nCAUSA: el equipo no tiene autorizada la depuración para esta "
+                "máquina. Aceptar el diálogo de depuración USB en la pantalla.")
+    return ""
+
+
+def adb_estado_app(lugar: Lugar, serial: str, paquete: str) -> str:
+    """
+    Qué build está instalada: versionName, versionCode, cuándo se instaló y se
+    actualizó por última vez, el instalador y la ruta del APK.
+
+    Es la pregunta natural después de cada install, y a mano son varios
+    `dumpsys package | grep` seguidos.
+    """
+    r = T.ejecutar(lugar, ["adb", "-s", serial, "shell", "dumpsys", "package",
+                           paquete], timeout=60)
+    texto = r.salida or ""
+    if not texto.strip() or "Unable to find package" in texto:
+        return (f"El paquete '{paquete}' no está instalado en {serial} "
+                f"(o el serial no corresponde a ningún equipo conectado).")
+    campos = (
+        ("versionName", r"versionName=(\S+)"),
+        ("versionCode", r"versionCode=(\d+)"),
+        ("minSdk", r"minSdk=(\d+)"),
+        ("targetSdk", r"targetSdk=(\d+)"),
+        ("firstInstallTime", r"firstInstallTime=(.+)"),
+        ("lastUpdateTime", r"lastUpdateTime=(.+)"),
+        ("installerPackageName", r"installerPackageName=(\S+)"),
+        ("codePath", r"codePath=(\S+)"),
+        ("flags", r"flags=\[([^\]]*)\]"),
+    )
+    lineas = [f"{paquete} en {serial}:"]
+    for etiqueta, patron in campos:
+        m = re.search(patron, texto)
+        if m:
+            lineas.append(f"  {etiqueta}: {m.group(1).strip()}")
+    if "DEBUGGABLE" in texto:
+        lineas.append("  debuggable: sí (run-as disponible: datastore_*, "
+                      "sqlite y adb_pull sobre datos de la app)")
+    return "\n".join(lineas)
+
+
+def adb_pull(lugar: Lugar, serial: str, remoto: str, destino: str,
+             paquete: str = "") -> T.Resultado:
+    """
+    Trae un archivo del dispositivo al lugar. Con 'paquete', usa run-as para
+    alcanzar el sandbox privado de una app DEBUGGABLE (donde `adb pull` directo
+    no llega): `run-as <paquete> cat <ruta>` y el binario se escribe aquí.
+    Sin 'paquete', es un `adb pull` normal.
+    """
+    destino_abs = str(normalizar(lugar.raiz, destino)) if lugar.es_local else destino
+    if not paquete:
+        return T.ejecutar(lugar, ["adb", "-s", serial, "pull", remoto,
+                                  destino_abs], timeout=300)
+    if not lugar.es_local:
+        return T.Resultado(2, "", "pull con run-as solo está implementado en "
+                                  "lugares locales por ahora.")
+    # exec-out y captura en BYTES CRUDOS, igual que adb_captura: pasar un .db
+    # por la decodificación de texto del transporte lo destruiría. Por eso aquí
+    # se invoca subprocess directo en vez de T.ejecutar.
+    import subprocess as _sp
+    try:
+        p = _sp.run(["adb", "-s", serial, "exec-out", "run-as", paquete,
+                     "cat", remoto], capture_output=True, timeout=300)
+    except Exception as e:
+        return T.Resultado(1, "", f"no se pudo traer {remoto}: {e}")
+    datos = p.stdout or b""
+    if p.returncode != 0 or not datos:
+        err = (p.stderr or b"").decode("utf-8", "replace").strip()
+        return T.Resultado(p.returncode or 1, "", (
+            f"run-as {paquete} cat {remoto} falló: {err or 'sin salida'}\n"
+            f"run-as requiere que la app sea DEBUGGABLE; verificarlo con "
+            f"adb_estado_app(serial, paquete)."))
+    from pathlib import Path as _P
+    ruta = _P(destino_abs)
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    ruta.write_bytes(datos)
+    return T.Resultado(0, f"Traído {remoto} -> {destino} ({len(datos)} bytes) "
+                          f"vía run-as {paquete}.", "")
+
+
+def adb_push(lugar: Lugar, serial: str, origen: str, remoto: str) -> T.Resultado:
+    """Sube un archivo del lugar al dispositivo (adb push)."""
+    origen_abs = str(normalizar(lugar.raiz, origen)) if lugar.es_local else origen
+    return T.ejecutar(lugar, ["adb", "-s", serial, "push", origen_abs, remoto],
+                      timeout=300)
 
 
 def adb_forcestop(lugar: Lugar, serial: str, paquete: str) -> T.Resultado:
@@ -345,7 +460,7 @@ def adb_tap_texto(lugar: Lugar, serial: str, texto: str, timeout: int = 12,
     if es_peligroso(texto) and not confirmado:
         return (f"BLOQUEADO: '{texto}' está en la lista negra del POS "
                 f"(cierre/anulación/borrar llaves/reversa/devolución). "
-                f"Si es intencional, reintentá con confirmado=True.")
+                f"Si es intencional, reintentar con confirmado=True.")
     import time as _t
     timeout = min(max(1, timeout), 40)
     t0 = _t.time()
@@ -420,7 +535,7 @@ def _ejecutar_cadena(lugar: Lugar, serial: str, arg: str, timeout: int = 12,
     for tk in tokens:  # lista negra: ningún tap peligroso sin confirmar
         if not _es_solo_digitos(tk) and es_peligroso(tk) and not confirmado:
             return (f"BLOQUEADO: '{tk}' está en la lista negra del POS. "
-                    f"Reintentá con confirmado=True (no encadenes lo peligroso).")
+                    f"Reintentar con confirmado=True (no encadenes lo peligroso).")
     import time as _t
     timeout = min(max(1, timeout), 40)
 
@@ -530,7 +645,7 @@ def _esperar_log(lugar: Lugar, serial: str, patron: str, timeout: int,
     t0 = _t.time()
     # 1) Barrido INMEDIATO del buffer reciente (-t 2000, sin filtro por hora):
     #    si el evento ya está logueado (guión que pausó, disparo previo) se
-    #    detecta al toque y no se pierde. En un guión, `inicio`/`limpiar_log`
+    #    detecta de inmediato y no se pierde. En un guión, `inicio`/`limpiar_log`
     #    hicieron `logcat -c`, así que no hay líneas viejas de falso positivo.
     r = T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-d", "-t", "2000"]
                    + filtro, timeout=20)
@@ -541,7 +656,7 @@ def _esperar_log(lugar: Lugar, serial: str, patron: str, timeout: int,
     #    en cuanto una línea matchea (latencia ~0, UN round-trip), en vez del
     #    poll de 0.6s que volcaba 2000 líneas por vuelta. El timeout lo pone el
     #    transporte (código 124 => no apareció).
-    #    OJO (aprendido en vivo): adbd LOGUEA la línea de comando de cada
+    #    ATENCION (aprendido en vivo): adbd LOGUEA la línea de comando de cada
     #    `adb shell`, así que si el patrón viajara EN CLARO, el logcat -e se
     #    matchearía A SÍ MISMO al instante (falso positivo: el guión dio por
     #    APROBADA una venta que seguía en el PIN). Por eso el patrón viaja en
@@ -593,28 +708,101 @@ def gradle_build(lugar: Lugar, proyecto: str, tarea: str) -> str:
             from . import trabajos as TR
             if not (p / "gradlew.bat").exists():
                 return f"error: no encuentro gradlew.bat en {p}"
-            tmpjava = _P(lugar.raiz) / ".witral" / "tmpjava"
-            tmpjava.mkdir(parents=True, exist_ok=True)
+            # El fix del sandbox de la JVM ya NO se arma aquí: vive en
+            # transporte.entorno_jvm y lo aplican por igual run, run_async y
+            # este build. Tenerlo solo en esta tool hacía que el mismo comando
+            # funcionara o muriera según por dónde entrara.
             # -Pkotlin.compiler.execution.strategy=daemon: si el proyecto fija
             # in-process (algunos proyectos lo fijan), el compilador Kotlin infla el
             # metaspace del daemon de Gradle y muere con OOM; el daemon de
             # Kotlin usa TCP loopback (funciona bajo el sandbox) y compila
             # aparte. Si el proyecto no fija nada, daemon ya era el default.
-            cmd = (f'set "JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir={tmpjava}" '
-                   f'&& cd /d "{p}" && gradlew.bat {tarea} '
+            cmd = (f'cd /d "{p}" && gradlew.bat {tarea} '
                    f'-Pkotlin.compiler.execution.strategy=daemon')
             jid = TR.lanzar(lugar, cmd)
             return (f"Build lanzado como trabajo: id {jid} ({proyecto} :: {tarea}).\n"
-                    f"Seguilo con run_esperar(id=\"{jid}\") hasta que termine "
+                    f"Seguirlo con run_esperar(id=\"{jid}\") hasta que termine "
                     f"(un build frío puede tomar varios minutos; re-llamar si "
-                    f"sigue). Al final: código 0 = BUILD SUCCESSFUL; si falla, "
-                    f"los errores de Kotlin son las líneas 'e:' del log "
-                    f"(buscar_contenido sobre .witral/jobs/{jid}/out.log con "
-                    f"patron=\"^e:\" los aísla).")
+                    f"sigue). Al final: código 0 = BUILD SUCCESSFUL.\n"
+                    f"Si falla: gradle_errores(\"{jid}\") devuelve solo las "
+                    f"líneas 'e:' deduplicadas. Los errores de Kotlin salen por "
+                    f"err.log, no por out.log — gradle_errores mira los dos, "
+                    f"así no hay que acordarse de cuál es.")
         salida = T.ejecutar(lugar, ["./gradlew", tarea], cwd=str(p), timeout=1800)
         return _fmt_resultado(salida)
     salida = T.ejecutar(lugar, f"cd '{proyecto}' && ./gradlew {tarea}", timeout=1800)
     return _fmt_resultado(salida)
+
+
+# Un error de compilación de Kotlin/Java sale como línea 'e:'. Gradle las emite
+# por STDERR, así que viven en err.log, no en out.log: el mensaje anterior
+# mandaba al log equivocado y costaba dos búsquedas.
+
+def gradle_errores(lugar: Lugar, jid: str, maximo: int = 60) -> str:
+    """
+    Solo los errores de compilación de un build lanzado como trabajo: las
+    líneas 'e:' de los DOS logs del job, deduplicadas y en orden.
+
+    Es lo primero que se quiere después de un build fallido, y evita tener que
+    recordar en qué log están (err.log) ni armar el buscar_contenido a mano.
+    Si no hay líneas 'e:', cae al bloque "What went wrong" de Gradle, que es lo
+    que explica los fallos que no son de compilación (dependencias, tareas,
+    configuración). Solo lectura.
+    """
+    import re
+
+    textos = []
+    if lugar.es_local:
+        from pathlib import Path as _P
+        base = _P(lugar.raiz) / ".witral" / "jobs" / jid
+        if not base.exists():
+            return (f"No existe el trabajo '{jid}' en {lugar.nombre}. "
+                    f"Ver run_status sin id para listar los trabajos.")
+        for nombre in ("err.log", "out.log"):
+            ruta = base / nombre
+            if ruta.exists():
+                textos.append(ruta.read_text(encoding="utf-8", errors="replace"))
+    else:
+        b = f".witral/jobs/{jid}"
+        r = T.ejecutar(lugar, f"cat {b}/err.log {b}/out.log 2>/dev/null",
+                       timeout=30)
+        if not r.salida.strip():
+            return f"Sin logs para el trabajo '{jid}' en {lugar.nombre}."
+        textos.append(r.salida)
+
+    vistas, errores = set(), []
+    for texto in textos:
+        for linea in texto.splitlines():
+            if re.match(r"^\s*e:\s", linea):
+                limpia = linea.strip()
+                if limpia not in vistas:
+                    vistas.add(limpia)
+                    errores.append(limpia)
+
+    if errores:
+        cabecera = (f"{len(errores)} error(es) de compilación en el trabajo "
+                    f"{jid}" + (f" (mostrando {maximo})" if len(errores) > maximo
+                                else ""))
+        return cabecera + ":\n" + "\n".join(errores[:maximo])
+
+    # Sin líneas 'e:': el fallo no es de compilación. El bloque de Gradle que
+    # lo explica arranca en "* What went wrong:" y termina en la línea vacía
+    # anterior a "* Try:".
+    for texto in textos:
+        if "What went wrong" in texto or "FAILURE:" in texto:
+            lineas = texto.splitlines()
+            i = next(k for k, l in enumerate(lineas)
+                     if "What went wrong" in l or l.startswith("FAILURE:"))
+            bloque = []
+            for l in lineas[i:i + 25]:
+                if l.startswith("* Try:"):
+                    break
+                bloque.append(l)
+            return (f"Sin errores de compilación en {jid}; el fallo es de "
+                    f"Gradle:\n" + "\n".join(bloque))
+    return (f"Sin líneas 'e:' ni bloque de fallo en los logs de {jid}. "
+            f"Si el build terminó con código 0, no hubo errores; "
+            f"si no, mirar el estado completo con run_status(id=\"{jid}\").")
 
 
 def _fmt_resultado(r: T.Resultado) -> str:

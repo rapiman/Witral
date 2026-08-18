@@ -133,7 +133,7 @@ def parsear(texto: str):
 
 def _inicio(lugar: Lugar, serial: str, pkg: str):
     if not pkg:
-        return False, ("falta el paquete: agregá 'paquete <pkg>' al guión o pasá "
+        return False, ("falta el paquete: agregar 'paquete <pkg>' al guión o pasar "
                        "el parámetro 'paquete' a adb_guion")
     # logcat grande y limpio (que no se pierda la evidencia) + estado conocido.
     T.ejecutar(lugar, ["adb", "-s", serial, "logcat", "-G", "16M"])
@@ -150,7 +150,7 @@ def _inicio(lugar: Lugar, serial: str, pkg: str):
     # responde OK — y el guión se cae dos o tres pasos después, con un mensaje
     # que apunta al lugar equivocado. Eso costó varias corridas hasta entenderlo.
     #
-    # Se hace acá, y no en cada guión, justamente para que ningún guión tenga
+    # Se hace aquí, y no en cada guión, justamente para que ningún guión tenga
     # que acordarse. Si el evento no aparece, no se aborta: se sigue y que falle
     # el paso real, que da mejor diagnóstico que un error genérico de arranque.
     r = M.adb_esperar(lugar, serial,
@@ -177,7 +177,7 @@ def _paso(lugar, serial, verbo, arg, pkg, permitidos, capturas):
         conf = M.es_peligroso(arg) and (M._norm(arg) in permitidos)
         r = M.adb_tap_texto(lugar, serial, arg, timeout=12, confirmado=conf)
         if r.startswith("BLOQUEADO"):
-            r += f" (agregá 'permitir {arg}' antes del tap para habilitarlo)"
+            r += f" (agregar 'permitir {arg}' antes del tap para habilitarlo)"
         return r.startswith("OK:"), r
     if verbo == "escribir":
         r = M.adb_escribir(lugar, serial, arg)
@@ -318,7 +318,7 @@ def correr(lugar: Lugar, serial: str, ruta: str, origen: Lugar | None = None,
                 traza.append(f"{idx:>2}/{total} pin ····  -> pausa (falta confirmado)")
                 cuerpo = (f"PASO PIN ({idx}/{total}): la máquina puede tipearlo, "
                           f"pero requiere el visto del usuario. Con su dale, "
-                          f"reintentá con confirmado=True y desde={idx}; o se "
+                          f"reintentar con confirmado=True y desde={idx}; o se "
                           f"tipea a mano y se sigue con desde={idx + 1}.\n"
                           + "\n".join(traza[-6:]))
                 return {"ok": True, "parcial": True, "siguiente": idx,

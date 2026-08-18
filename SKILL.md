@@ -1,6 +1,6 @@
 ---
 name: witral
-description: Suite de desarrollo propia (un MCP) construida sobre el modelo "lugares × acciones": hay lugares definidos en config (local, dev, prod...) y acciones que se aplican a cualquiera de ellos (leer, editar, buscar, correr psql, git, ping, copiar/desplegar entre lugares, trabajos en segundo plano, adb, gradle, y automatización de UI de terminales POS: captura, árbol de vistas, tap por texto, esperas y guiones). Usar siempre que se trabaje con archivos de proyecto o web, se apliquen migraciones de base de datos, se promueva un cambio entre máquinas (local→dev→prod), se corra un build, se inspeccione un repo, se toque cualquier cosa en un servidor remoto, o se automatice/pruebe un flujo en un terminal Android/POS (tapear por texto, correr un guión de UI, verificar por logcat). El usuario piensa en términos de "hacé esto, en tal lugar" y "moveme esto de acá para allá": resolver el lugar y ejecutar la acción allí, sin pedir detalles de conexión que ya están en config. Consultar esta skill aunque no se nombre la herramienta — basta con que la tarea sea editar/mover archivos, aplicar una migración, hacer algo en un server, o manejar un terminal POS.
+description: Suite de desarrollo propia (un MCP) construida sobre el modelo "lugares × acciones": hay lugares definidos en config (local, dev, prod...) y acciones que se aplican a cualquiera de ellos (leer, editar, buscar, correr psql, git, ping, copiar/desplegar entre lugares, trabajos en segundo plano, adb, gradle, y automatización de UI de terminales POS: captura, árbol de vistas, tap por texto, esperas y guiones). Usar siempre que se trabaje con archivos de proyecto o web, se apliquen migraciones de base de datos, se promueva un cambio entre máquinas (local→dev→prod), se corra un build, se inspeccione un repo, se toque cualquier cosa en un servidor remoto, o se automatice/pruebe un flujo en un terminal Android/POS (tapear por texto, correr un guión de UI, verificar por logcat). El usuario piensa en términos de "hacé esto, en tal lugar" y "moveme esto de aquí para allá": resolver el lugar y ejecutar la acción allí, sin pedir detalles de conexión que ya están en config. Consultar esta skill aunque no se nombre la herramienta — basta con que la tarea sea editar/mover archivos, aplicar una migración, hacer algo en un server, o manejar un terminal POS.
 ---
 
 # Witral — modelo "lugares × acciones"
@@ -19,7 +19,7 @@ todo lo demás se deriva de él:
 - **Cualquier acción se aplica a cualquier lugar** mediante el parámetro `donde`. La
   acción no cambia según el lugar; solo cambia por dónde viaja.
 
-El usuario piensa así: *"hacé esto, en tal lugar"* y *"moveme esto de acá para allá"*.
+El usuario piensa así: *"hacé esto, en tal lugar"* y *"moveme esto de aquí para allá"*.
 Witral resuelve el lugar (sus coordenadas ya están en config) y ejecuta. Nunca se le
 piden al usuario datos de conexión que la config ya tiene.
 

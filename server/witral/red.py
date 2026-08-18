@@ -42,7 +42,8 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str | None = None,
                  params: dict | None = None,
                  lugar: Lugar | None = None,
                  a_archivo: str | None = None,
-                 max_salida: int = 4000) -> str:
+                 max_salida: int = 4000,
+                 auth: str = "") -> str:
     """
     Petición HTTP/HTTPS desde un lugar. Devuelve status, headers y body
     (truncado). En local usa urllib (stdlib); en remoto arma y ejecuta curl.
@@ -60,16 +61,36 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str | None = None,
     la forma correcta de traer respuestas grandes sin atascar el transporte
     MCP; después se procesa el archivo con leer/buscar_contenido/run.
     'max_salida': tope de chars del cuerpo mostrado inline (con aviso).
+
+    'auth': autorización por NOMBRE de credencial del Credential Manager, sin
+    que el token pase por la conversación ni por un script temporal.
+    Formas: "bearer:<cred>", "token:<cred>" (GitHub clásico),
+    "basic:<cred>" (usa el usuario guardado en la credencial) y
+    "header:<Nombre>:<cred>" (X-Api-Key y demás). El valor se enmascara (····)
+    en cualquier salida.
     """
     import urllib.parse
+    from . import secretos as SEC
+
+    secreto_usado = ""
+    if auth:
+        try:
+            extra, secreto_usado = SEC.headers_auth(auth)
+        except SEC.SecretoNoEncontrado as e:
+            return f"error: {e}"
+        headers = dict(headers or {})
+        headers.update(extra)
+
+    def _limpio(texto: str) -> str:
+        return SEC.enmascarar(texto, secreto_usado) if secreto_usado else texto
 
     if params:
         sep = "&" if "?" in url else "?"
         url = url + sep + urllib.parse.urlencode(params)
 
     if lugar is not None and not lugar.es_local:
-        return _http_remoto(lugar, url, metodo, cuerpo, headers, timeout,
-                            a_archivo, max_salida)
+        return _limpio(_http_remoto(lugar, url, metodo, cuerpo, headers,
+                                    timeout, a_archivo, max_salida))
 
     import urllib.request
     import urllib.error
@@ -93,12 +114,13 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str | None = None,
                         f"buscar_contenido / run.")
             body = crudo.decode("utf-8", "replace")
             hdrs = "\n".join(f"{k}: {v}" for k, v in resp.headers.items())
-            return f"HTTP {resp.status}\n{hdrs}\n\n{_truncar(body, max_salida)}"
+            return _limpio(
+                f"HTTP {resp.status}\n{hdrs}\n\n{_truncar(body, max_salida)}")
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace")
-        return f"HTTP {e.code} {e.reason}\n{_truncar(body, 2000)}"
+        return _limpio(f"HTTP {e.code} {e.reason}\n{_truncar(body, 2000)}")
     except Exception as e:
-        return f"error: {e}"
+        return _limpio(f"error: {e}")
 
 
 def _http_remoto(lugar: Lugar, url: str, metodo: str, cuerpo: str | None,

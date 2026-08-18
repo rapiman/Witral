@@ -64,11 +64,21 @@ def lanzar(lugar: Lugar, comando: str) -> str:
         if os.name == "nt":
             # Batch: %errorlevel% se expande línea a línea, así que tras el
             # bloque ya trae el código del comando. chcp 65001 => salida UTF-8.
+            # El comando va en SU PROPIO .cmd y se invoca con CALL. Motivo: en
+            # batch, invocar otro .bat/.cmd SIN `call` TRANSFIERE el control y
+            # el script que llama nunca retoma. Con el comando inline, un
+            # `gradlew.bat` terminaba el wrapper entero y la línea que escribe
+            # `codigo` no llegaba a ejecutarse: el build terminaba bien, el
+            # proceso desaparecía y el trabajo quedaba para siempre "sin código"
+            # (de ahí el estado contradictorio que veía run_esperar). Con CALL,
+            # el control vuelve y el errorlevel del comando se registra.
+            interno = base / "comando.cmd"
+            interno.write_text(f"@echo off\r\n@chcp 65001 >nul\r\n{comando}\r\n",
+                               encoding="utf-8")
             bat = base / "lanzar.cmd"
             bat.write_text(
                 "@echo off\r\n"
-                "@chcp 65001 >nul\r\n"
-                f"(\r\n{comando}\r\n) > \"{out}\" 2> \"{err}\"\r\n"
+                f"call \"{interno}\" > \"{out}\" 2> \"{err}\"\r\n"
                 f"echo %errorlevel% > \"{cod}\"\r\n",
                 encoding="utf-8",
             )
@@ -78,8 +88,13 @@ def lanzar(lugar: Lugar, comando: str) -> str:
             # Verificado con A/B: DETACHED => out vacío; NO_WINDOW => captura OK.
             flags = (subprocess.CREATE_NEW_PROCESS_GROUP
                      | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000))
+            # Los trabajos también heredan el fix de la JVM bajo sandbox: un
+            # build lanzado por run_async no tiene por qué comportarse distinto
+            # de uno lanzado por gradle_build.
+            entorno = dict(os.environ)
+            entorno.update(T.entorno_jvm(lugar.raiz))
             proc = subprocess.Popen(
-                ["cmd", "/c", str(bat)], cwd=lugar.raiz,
+                ["cmd", "/c", str(bat)], cwd=lugar.raiz, env=entorno,
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL, creationflags=flags,
             )
@@ -134,6 +149,79 @@ def _cola_texto(texto: str, n: int) -> str:
     return "\n".join(lineas[-n:]) if lineas else ""
 
 
+# Marcas de cierre que un log deja cuando el trabajo llegó al final por sus
+# propios medios. Sirven para no declarar "abortado" un build que terminó bien.
+_MARCAS_FIN = (
+    ("BUILD SUCCESSFUL", "0"),
+    ("BUILD FAILED", "distinto de 0"),
+    ("FAILURE: Build failed", "distinto de 0"),
+)
+
+# Margen tras lanzar durante el cual la ausencia de pid es "recién lanzado" y
+# no "murió": el pid se escribe un instante después de arrancar el proceso.
+_GRACIA_LANZADO = 10.0
+
+
+def _marca_fin(base) -> tuple[str, str]:
+    """(codigo_inferido, marca) leyendo el final de los logs; ("","") si nada."""
+    for nombre in ("out.log", "err.log"):
+        ruta = base / nombre
+        if not ruta.exists():
+            continue
+        try:
+            cola = _cola_texto(
+                ruta.read_text(encoding="utf-8", errors="replace"), 40)
+        except OSError:
+            continue
+        for marca, cod in _MARCAS_FIN:
+            if marca in cola:
+                return cod, marca
+    return "", ""
+
+
+def _diagnostico_local(base) -> tuple[str, str, str]:
+    """
+    ÚNICO lugar que decide en qué estado está un trabajo local. Devuelve
+    (estado, codigo, detalle) con estado en:
+      no_existe | corriendo | terminado | terminado_sin_codigo
+
+    Todo el texto que se le muestra a quien llama se deriva de aquí, para que no
+    puedan volver a convivir tres afirmaciones incompatibles ("sin código",
+    "BUILD SUCCESSFUL" y "sigue corriendo") en la misma respuesta.
+    """
+    if not base.exists():
+        return "no_existe", "", ""
+    ruta_cod = base / "codigo"
+    if ruta_cod.exists():
+        try:
+            return "terminado", ruta_cod.read_text(
+                encoding="utf-8", errors="replace").strip(), ""
+        except OSError:
+            pass
+    pid = None
+    try:
+        pid = int((base / "pid").read_text().strip())
+    except Exception:
+        pass
+    if pid and _pid_vivo_local(pid):
+        return "corriendo", "", f"pid {pid}"
+    if pid is None:
+        # Sin pid todavía: recién lanzado, no muerto (salvo que ya pasó rato).
+        try:
+            edad = time.time() - base.stat().st_mtime
+        except OSError:
+            edad = _GRACIA_LANZADO + 1
+        if edad < _GRACIA_LANZADO:
+            return "corriendo", "", "recién lanzado, pid aún no registrado"
+    cod, marca = _marca_fin(base)
+    if cod:
+        return ("terminado_sin_codigo", cod,
+                f"el proceso ya no existe y el log cierra en '{marca}'")
+    return ("terminado_sin_codigo", "",
+            "el proceso ya no existe y el log no tiene marca de cierre "
+            "(abortado, o el wrapper murió antes de registrar el código)")
+
+
 def estado(lugar: Lugar, jid: str, lineas: int = 40) -> str:
     """Estado + últimas líneas de salida de un trabajo."""
     if lugar.es_local:
@@ -145,22 +233,16 @@ def estado(lugar: Lugar, jid: str, lineas: int = 40) -> str:
             partes.append("cmd: " + (base / "cmd.txt").read_text(encoding="utf-8").strip())
         except Exception:
             pass
-        cod = None
-        if (base / "codigo").exists():
-            cod = (base / "codigo").read_text(encoding="utf-8", errors="replace").strip()
-        if cod is not None:
+        est, cod, detalle = _diagnostico_local(base)
+        if est == "terminado":
             partes.append(f"estado: TERMINADO, código {cod}")
+        elif est == "corriendo":
+            partes.append(f"estado: CORRIENDO ({detalle})")
+        elif cod:
+            partes.append(f"estado: TERMINADO, código {cod} (inferido: {detalle}; "
+                          f"el wrapper no alcanzó a registrarlo)")
         else:
-            pid = None
-            try:
-                pid = int((base / "pid").read_text().strip())
-            except Exception:
-                pass
-            if pid and _pid_vivo_local(pid):
-                partes.append(f"estado: CORRIENDO (pid {pid})")
-            else:
-                partes.append("estado: sin código y proceso no encontrado "
-                              "(¿abortado o recién lanzado?)")
+            partes.append(f"estado: TERMINADO sin código — {detalle}")
         for nombre in ("out.log", "err.log"):
             ruta = base / nombre
             if ruta.exists():
@@ -181,7 +263,8 @@ def estado(lugar: Lugar, jid: str, lineas: int = 40) -> str:
         f"else pid=$(cat \"$b/pid\" 2>/dev/null); "
         f"if [ -n \"$pid\" ] && kill -0 \"$pid\" 2>/dev/null; then "
         f"echo \"estado: CORRIENDO (pid $pid)\"; "
-        f"else echo \"estado: sin código y proceso no encontrado\"; fi; fi; "
+        f"else echo \"estado: TERMINADO sin código — el proceso ya no existe "
+        f"(abortado, o el wrapper murió antes de registrarlo)\"; fi; fi; "
         f"echo \"--- out.log (últimas {lineas}) ---\"; tail -n {lineas} \"$b/out.log\" 2>/dev/null; "
         f"echo \"--- err.log (últimas {lineas}) ---\"; tail -n {lineas} \"$b/err.log\" 2>/dev/null"
     )
@@ -195,17 +278,21 @@ def _estado_rapido(lugar: Lugar, jid: str) -> str:
     """Chequeo LIVIANO del estado de un trabajo: 'no_existe'|'terminado'|'corriendo'.
     Local: solo mira archivos en disco (barato). Remoto: un SSH corto."""
     if lugar.es_local:
-        base = _dir_jobs_local(lugar) / jid
-        if not base.exists():
-            return "no_existe"
-        return "terminado" if (base / "codigo").exists() else "corriendo"
+        return _diagnostico_local(_dir_jobs_local(lugar) / jid)[0]
     b = f"{_DIR_REMOTO}/{jid}"
-    linea = (f"if [ ! -d {_q(b)} ]; then echo no_existe; "
-             f"elif [ -f {_q(b)}/codigo ]; then echo terminado; "
-             f"else echo corriendo; fi")
+    # Mismo criterio que en local: la ausencia de 'codigo' NO alcanza para decir
+    # "corriendo"; hay que mirar si el proceso sigue vivo.
+    linea = (f"b={_q(b)}; "
+             f"if [ ! -d \"$b\" ]; then echo no_existe; "
+             f"elif [ -f \"$b/codigo\" ]; then echo terminado; "
+             f"else pid=$(cat \"$b/pid\" 2>/dev/null); "
+             f"if [ -z \"$pid\" ]; then echo corriendo; "
+             f"elif kill -0 \"$pid\" 2>/dev/null; then echo corriendo; "
+             f"else echo terminado_sin_codigo; fi; fi")
     r = T.ejecutar(lugar, linea, timeout=20)
     est = (r.salida or "").strip()
-    return est if est in ("no_existe", "terminado", "corriendo") else "corriendo"
+    return est if est in ("no_existe", "terminado", "corriendo",
+                          "terminado_sin_codigo") else "corriendo"
 
 
 def esperar(lugar: Lugar, jid: str, hasta_segundos: int = 600,
@@ -228,7 +315,10 @@ def esperar(lugar: Lugar, jid: str, hasta_segundos: int = 600,
         if est == "no_existe":
             return (f"No existe el trabajo '{jid}' en {lugar.nombre}. "
                     f"Ver run_status sin id.")
-        if est == "terminado":
+        if est in ("terminado", "terminado_sin_codigo"):
+            # TERMINAL: se devuelve el estado y NUNCA el pie de "volver a
+            # llamar". Que el pie sea inalcanzable desde aquí es justamente el
+            # arreglo: antes se decidía por reloj, sin mirar este estado.
             return estado(lugar, jid, lineas)
         transcurrido = time.time() - t0
         if transcurrido >= presupuesto:
@@ -236,7 +326,7 @@ def esperar(lugar: Lugar, jid: str, hasta_segundos: int = 600,
             return (parcial + f"\n\n[run_esperar: sigue CORRIENDO tras "
                     f"~{int(transcurrido)}s. El cliente MCP corta las llamadas "
                     f"largas, por eso la espera se topa en ~{_TOPE_ESPERA}s. "
-                    f"Volvé a llamar run_esperar(id=\"{jid}\", donde=\""
+                    f"Volver a llamar run_esperar(id=\"{jid}\", donde=\""
                     f"{lugar.nombre}\") para seguir esperando.]")
         # No pasarse del presupuesto en el último sleep.
         time.sleep(min(intervalo, max(0.2, presupuesto - transcurrido)))
@@ -254,10 +344,13 @@ def listar(lugar: Lugar, maximo: int = 15) -> str:
             return f"Sin trabajos en {lugar.nombre}."
         out = []
         for d in dirs:
-            if (d / "codigo").exists():
-                est = "terminado(" + (d / "codigo").read_text(errors="replace").strip() + ")"
+            e, cod, _det = _diagnostico_local(d)
+            if e == "terminado":
+                est = f"terminado({cod})"
+            elif e == "corriendo":
+                est = "corriendo"
             else:
-                est = "corriendo?"
+                est = f"terminado sin código({cod or '?'})"
             out.append(f"- {d.name}  {est}")
         return f"Trabajos en {lugar.nombre}:\n" + "\n".join(out)
     linea = (

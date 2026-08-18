@@ -196,6 +196,31 @@ def _decodificar_salida(data: bytes) -> str:
     return data.decode("latin-1", "replace")
 
 
+def entorno_jvm(raiz: str | None = None) -> dict[str, str]:
+    """
+    Variables que necesita cualquier JVM lanzada bajo el sandbox del cliente
+    MCP, no solo Gradle. Desde JDK 16 los pipes NIO de Java crean un socket
+    AF_UNIX en el TMP y ahí el sandbox lo rompe con EINVAL — el histórico
+    "Unable to establish loopback connection". Apuntar
+    -Djdk.net.unixdomain.tmpdir a una carpeta de la raíz lo evita.
+
+    Vive en el TRANSPORTE, no en gradle_build, justamente porque tenerlo en una
+    sola tool era una trampa: el mismo `gradlew --stop` moría por `run` y
+    funcionaba por `gradle_build`, sin forma de saberlo la primera vez.
+    Fuera de Windows no aplica y devuelve {}.
+    """
+    if _os.name != "nt":
+        return {}
+    from pathlib import Path
+    base = Path(raiz) if raiz else Path.home()
+    destino = base / ".witral" / "tmpjava"
+    try:
+        destino.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return {}
+    return {"JAVA_TOOL_OPTIONS": f"-Djdk.net.unixdomain.tmpdir={destino}"}
+
+
 def _matar_arbol(proc) -> None:
     """
     Mata el ÁRBOL de procesos de 'proc', no solo el hijo directo. Con
@@ -226,6 +251,10 @@ def _ejecutar_local(argv, *, cwd, entrada, timeout, env_extra=None) -> Resultado
     # mensaje claro que colgarse en un prompt que nadie va a responder.
     env.setdefault("GIT_TERMINAL_PROMPT", "0")
     env.setdefault("GCM_INTERACTIVE", "never")
+    # Fix de la JVM bajo sandbox para TODA ejecución local, no solo gradle_build
+    # (ver entorno_jvm). Si quien llama ya lo fijó, se respeta.
+    for k, v in entorno_jvm(cwd).items():
+        env.setdefault(k, v)
     if env_extra:
         env.update(env_extra)
     # Asegurar TMP/TEMP válidos: el entorno heredado del cliente MCP puede
@@ -371,8 +400,8 @@ def _ejecutar_remoto(lugar, argv, *, cwd, entrada, timeout,
             if _es_error_conexion(e):
                 return Resultado(1, "", (
                     f"conexión perdida durante el comando en {lugar.nombre} ({e}). "
-                    f"No se reintentó para no duplicar efectos; verificá el estado "
-                    f"con una lectura y reintentá si corresponde."))
+                    f"No se reintentó para no duplicar efectos; verificar el estado "
+                    f"con una lectura y reintentar si corresponde."))
             raise TransporteError(_diagnostico_ssh(e, lugar.nombre))
         return Resultado(codigo, salida, error)
 

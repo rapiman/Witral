@@ -65,7 +65,7 @@ def _resolver(donde: str | None):
             )
         return None, (
             f"DESTINO DESCONOCIDO: '{donde}'. {e}\n"
-            f"No se conectó. Confirmá con el usuario y agregá el lugar a la "
+            f"No se conectó. Confirmar con el usuario y agregar el lugar a la "
             f"config antes de reintentar."
         )
 
@@ -213,7 +213,7 @@ def _verificar_sintaxis_texto(lg, archivo: str) -> str:
             # Kotlin (referencias sin resolver, campos borrados, falta de
             # suspend) son invisibles para el balance de delimitadores.
             que_no_ve = (
-                "OJO: el 'balance OK' de arriba SOLO cubre delimitadores — NO "
+                "ATENCION: el 'balance OK' de arriba SOLO cubre delimitadores — NO "
                 "detecta referencias sin resolver, imports faltantes, tipos, "
                 "campos borrados ni suspend/when; eso solo lo ve el compilador. "
                 "Mitigación: buscar_contenido del símbolo tocado para enumerar "
@@ -288,7 +288,7 @@ def convertir_eol(archivo: str, a: str, donde: str = "local") -> str:
     """
     Convierte el fin de línea de un archivo entero a LF o CRLF ('a'="lf"|"crlf").
     Útil para pasar archivos clonados en Windows (CRLF) a LF para proyectos
-    Linux, o limpiar saltos mezclados. Hace backup. OJO: reescribe todo el
+    Linux, o limpiar saltos mezclados. Hace backup. ATENCION: reescribe todo el
     archivo, así que en git aparece como muchas líneas cambiadas (es esperado).
     Para editar contenido NO se usa esto; las tools de edición preservan el EOL.
     """
@@ -331,16 +331,16 @@ def editar_linea(archivo: str, desde: int = 0, hasta: int = 0, nuevo: str = "",
     whitespace. Backup automático y devuelve el fragmento resultante para
     verificar en el acto.
 
-    UNA SOLA LÍNEA: pasá 'linea=N' (alias cómodo de desde=hasta=N), o bien 'desde'
-    y omitir 'hasta' (toma el valor de 'desde'). Para vaciar/borrar una línea, dejá
-    'nuevo'="" (o pasá varias líneas en 'nuevo' con \\n para expandir el rango).
+    UNA SOLA LÍNEA: pasar 'linea=N' (alias cómodo de desde=hasta=N), o bien 'desde'
+    y omitir 'hasta' (toma el valor de 'desde'). Para vaciar/borrar una línea, dejar
+    'nuevo'="" (o pasar varias líneas en 'nuevo' con \\n para expandir el rango).
 
-    PARÁMETRO 'ancla' (muy recomendado): si lo pasás con el contenido que
+    PARÁMETRO 'ancla' (muy recomendado): si se pasa con el contenido que
     ESPERÁS que tengan esas líneas, la edición se aplica SOLO si coincide
     (comparación inmune a CRLF/espacios); si no coincide, aborta sin tocar el
     archivo y muestra esperado vs encontrado. Es la red de seguridad contra
     perder la cuenta de líneas. Sin 'ancla', edita el rango directo confiando
-    en los números. Usá leer con rango antes para ubicar las líneas.
+    en los números. Usar leer con rango antes para ubicar las líneas.
     El ancla puede ser PARCIAL: con menos líneas que el rango valida solo el
     COMIENZO; y con una línea "..." en el medio (ej. "primera\\n...\\núltima")
     valida COMIENZO y FINAL — ideal para borrar bloques largos (nuevo="") sin
@@ -422,9 +422,9 @@ def borrar(ruta: str, donde: str = "local", confirmado: bool = False) -> str:
         return aviso
     if not confirmado:
         return (
-            f"CONFIRMACIÓN REQUERIDA: vas a borrar '{ruta}' en '{donde}'.\n"
-            f"Va a la papelera (recuperable), pero confirmá con el usuario y "
-            f"reintentá con confirmado=True."
+            f"CONFIRMACIÓN REQUERIDA: se va a borrar '{ruta}' en '{donde}'.\n"
+            f"Va a la papelera (recuperable), pero confirmar con el usuario y "
+            f"reintentar con confirmado=True."
         )
     try:
         return A.borrar(lg, ruta)
@@ -444,7 +444,7 @@ def vaciar_papelera(donde: str = "local", confirmado: bool = False) -> str:
     if not confirmado:
         return (
             f"CONFIRMACIÓN REQUERIDA: vaciar la papelera de '{donde}' es "
-            f"DEFINITIVO e irreversible. Confirmá con el usuario y reintentá "
+            f"DEFINITIVO e irreversible. Confirmar con el usuario y reintentar "
             f"con confirmado=True."
         )
     try:
@@ -478,7 +478,7 @@ def copiar(origen: str = "", destino: str = "", origen_ruta: str = "",
     if destino:
         destino_lugar, destino_ruta = CP.partir_lugar_ruta(destino, _cfg.nombres)
     if not origen_ruta or not destino_lugar or not destino_ruta:
-        return ("Faltan datos de la copia. Usá la forma compacta "
+        return ("Faltan datos de la copia. Usar la forma compacta "
                 "(origen=\"lugar:ruta\", destino=\"lugar:ruta\") o la explícita "
                 "(origen_ruta, destino_lugar, destino_ruta).")
     d, aviso = _resolver(destino_lugar)
@@ -489,9 +489,9 @@ def copiar(origen: str = "", destino: str = "", origen_ruta: str = "",
         return aviso
     if d.sensible and not confirmado:
         return (
-            f"CONFIRMACIÓN REQUERIDA: vas a copiar hacia '{destino_lugar}' "
-            f"(sensible). Mostrá al usuario qué archivo ({origen_ruta}) y a qué "
-            f"ruta ({destino_ruta}), y reintentá con confirmado=True."
+            f"CONFIRMACIÓN REQUERIDA: se va a copiar hacia '{destino_lugar}' "
+            f"(sensible). Mostrar al usuario qué archivo ({origen_ruta}) y a qué "
+            f"ruta ({destino_ruta}), y reintentar con confirmado=True."
         )
     try:
         return CP.copiar(_cfg, origen_lugar, origen_ruta, destino_lugar, destino_ruta)
@@ -523,7 +523,7 @@ def desplegar(origen: str, destino: str, servicio: str = "",
     origen_lugar, origen_ruta = CP.partir_lugar_ruta(origen, _cfg.nombres)
     destino_lugar, destino_ruta = CP.partir_lugar_ruta(destino, _cfg.nombres)
     if not origen_ruta or not destino_lugar or not destino_ruta:
-        return ("Faltan datos. Usá origen=\"lugar:ruta\" y destino=\"lugar:ruta\" "
+        return ("Faltan datos. Usar origen=\"lugar:ruta\" y destino=\"lugar:ruta\" "
                 "(ej. destino=\"dev:/srv/app/app.py\").")
     d, aviso = _resolver(destino_lugar)
     if aviso:
@@ -541,7 +541,7 @@ def desplegar(origen: str, destino: str, servicio: str = "",
             pasos.append(f"3) esperar {espera}s y probar {prueba_url}")
         return (f"CONFIRMACIÓN REQUERIDA: desplegar en '{destino_lugar}'{extra}.\n"
                 + "\n".join(pasos) +
-                "\nConfirmá con el usuario y reintentá con confirmado=True.")
+                "\nConfirmar con el usuario y reintentar con confirmado=True.")
     partes = []
     # 1) copiar (si falla, se aborta: no tiene sentido reiniciar con lo viejo).
     try:
@@ -610,37 +610,124 @@ def _es_solo_lectura(comando: str) -> bool:
     return True
 
 
-def _envolver_shell(lg, comando: str, shell: str) -> str:
-    """Con shell="powershell" (solo lugares Windows), envuelve el comando para
-    PowerShell vía -EncodedCommand (base64 de UTF-16LE): el comando se escribe
-    en sintaxis PowerShell normal y viaja intacto, sin peleas de escapado con
-    cmd. Con shell vacío devuelve el comando tal cual."""
-    if not shell:
-        return comando
-    if shell not in ("powershell", "ps", "pwsh"):
-        raise ValueError(f"shell '{shell}' no soportado (usar \"powershell\").")
-    if not getattr(lg, "es_windows", False):
-        raise ValueError("shell=\"powershell\" es solo para lugares Windows.")
+def _a_powershell(comando: str) -> str:
+    """Envuelve el comando para PowerShell vía -EncodedCommand (base64 de
+    UTF-16LE): se escribe en sintaxis PowerShell normal y viaja intacto, sin
+    peleas de escapado con cmd."""
     import base64 as _b64
     cod = _b64.b64encode(comando.encode("utf-16-le")).decode("ascii")
     return f"powershell -NoProfile -NonInteractive -EncodedCommand {cod}"
 
 
+# Construcciones con las que cmd.exe pelea y PowerShell no. Lista CORTA y de
+# alta señal a propósito: shell="auto" solo desvía a PowerShell cuando la pelea
+# es segura, no ante cualquier caracter raro.
+_CMD_PELEA = (
+    ("\\|", "alternación escapada (\\|): findstr no la soporta en cmd"),
+    ("%%", "%% de los for de cmd"),
+    ('\\"', "comillas dobles escapadas"),
+    ('""', "comillas dobles anidadas"),
+)
+
+# Fallos típicos de cmd que en PowerShell no ocurren (español e inglés). Se usan
+# para el reintento automático: cubren lo que la detección previa no anticipó.
+_CMD_FALLO = (
+    "was unexpected at this time",
+    "the syntax of the command is incorrect",
+    "is not recognized as an internal or external command",
+    "no se esperaba en este momento",
+    "sintaxis del comando no es correcta",
+    "no se reconoce como un comando interno o externo",
+)
+
+
+def _motivo_powershell(comando: str) -> str:
+    """
+    Motivo por el que cmd va a pelear con 'comando', o "" si no hay ninguno.
+    Conservador: si el comando encadena con && o ||, NO se propone PowerShell
+    (Windows PowerShell 5.1 no soporta esos operadores y romperlo sería peor
+    que la pelea de comillas). %VAR% tampoco cuenta: ahí cmd es lo que se
+    quiso, y en PowerShell no expandiría.
+    """
+    if "&&" in comando or "||" in comando:
+        return ""
+    for marca, motivo in _CMD_PELEA:
+        if marca in comando:
+            return motivo
+    import re as _re
+    if _re.search(r"'[^']* [^']*'", comando):
+        return "comillas simples como agrupador (cmd las pasa literales)"
+    return ""
+
+
+def _huele_a_fallo_de_cmd(r: T.Resultado) -> bool:
+    """¿El fallo delata a cmd (sintaxis/comando no reconocido) y no al comando?"""
+    if r.codigo == 0 or r.salida.strip():
+        return False
+    err = r.error.lower()
+    return any(s in err for s in _CMD_FALLO)
+
+
+def _envolver_shell(lg, comando: str, shell: str) -> tuple[str, str]:
+    """
+    Devuelve (comando_a_ejecutar, nota). 'shell':
+      - "auto" (por defecto): en lugares Windows, PowerShell SOLO si se detecta
+        una construcción con la que cmd pelea; si no, cmd tal cual.
+      - "powershell"/"ps"/"pwsh": fuerza PowerShell (solo Windows).
+      - "cmd" o "": fuerza cmd, sin desvío automático.
+    """
+    if shell in ("cmd", ""):
+        return comando, ""
+    es_win = bool(getattr(lg, "es_windows", False))
+    if shell == "auto":
+        if not es_win:
+            return comando, ""
+        motivo = _motivo_powershell(comando)
+        if not motivo:
+            return comando, ""
+        return _a_powershell(comando), f"[shell=auto: PowerShell por {motivo}]"
+    if shell not in ("powershell", "ps", "pwsh"):
+        raise ValueError(
+            f"shell '{shell}' no soportado (usar \"auto\", \"powershell\" o \"cmd\").")
+    if not es_win:
+        raise ValueError("shell=\"powershell\" es solo para lugares Windows.")
+    return _a_powershell(comando), ""
+
+
+_RUN_TOPE = 45  # s: tope propio, por debajo del corte del cliente MCP (~60s)
+
+
 @mcp.tool()
 def run(comando: str, donde: str = "local", confirmado: bool = False,
-        max_salida: int = 40000, shell: str = "") -> str:
+        max_salida: int = 40000, shell: str = "auto",
+        segundos: int = _RUN_TOPE) -> str:
     """
     Ejecuta un comando arbitrario en un lugar (local o remoto) y devuelve la
     salida. SIEMPRE requiere confirmado=True: es una escotilla de propósito
     general. Para operaciones comunes (archivos, git, procesos, servicios)
-    preferí las tools tipadas con eje 'donde', que son más seguras y claras.
+    preferir las tools tipadas con eje 'donde', que son más seguras y claras.
     El directorio de trabajo es la RAÍZ del lugar (en local, Proyectos\\), así
     que las rutas relativas se resuelven contra ella. 'max_salida' acota los
     chars devueltos (trunca con aviso; salidas gigantes atascan el MCP).
-    'shell'="powershell" (solo Windows): el comando se escribe en PowerShell y
-    corre vía -EncodedCommand — recomendado en Windows en cuanto cmd empiece a
-    pelear (findstr sin alternación, %% en los for, comillas anidadas, head/tr
-    que a veces no están).
+
+    'segundos' (por defecto 45, tope 45): Witral corta ANTES que el cliente
+    MCP (~60s) y devuelve código 124 con el aviso de pasar a run_async. Así un
+    comando que se pasó de largo se ve como un timeout limpio y accionable, no
+    como una llamada muerta.
+
+    EN LUGARES WINDOWS EL SHELL ES cmd, NO bash: no hay heredocs (`<<EOF`
+    muere con "no se esperaba << en este momento"), ni `$(...)`, ni comillas
+    simples como agrupador. Para un bloque de texto multilínea, la alternativa
+    es shell="powershell" con here-string (@' ... '@), o escribir el contenido
+    con `escribir` y ejecutar el archivo. En lugares unix sí es shell POSIX.
+
+    'shell': "auto" (por defecto) usa cmd salvo que detecte una construcción
+    con la que cmd pelea (alternación \\| de findstr, %% de los for, comillas
+    anidadas o escapadas, comillas simples como agrupador) — ahí envuelve en
+    PowerShell vía -EncodedCommand y lo dice en la salida. Si cmd igual falla
+    por sintaxis o por comando no reconocido y el comando es de solo lectura,
+    reintenta solo en PowerShell. "powershell" fuerza PowerShell; "cmd" fuerza
+    cmd sin desvío. Con && o || nunca desvía (PowerShell 5.1 no los soporta).
     """
     lg, aviso = _resolver(donde)
     if aviso:
@@ -654,23 +741,40 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
             f"Comando: {comando}\n"
             f"Si existe una tool tipada para esto (borrar, editar, git_*, "
             f"matar_proceso, servicio, etc.) usala mejor. "
-            f"Para continuar igual, reintentá con confirmado=True."
+            f"Para continuar igual, reintentar con confirmado=True."
         )
     try:
-        comando = _envolver_shell(lg, comando, shell)
+        cmd, nota = _envolver_shell(lg, comando, shell)
     except ValueError as e:
         return f"error: {e}"
+    tope = max(5, min(int(segundos or _RUN_TOPE), _RUN_TOPE))
     try:
         # cwd = raíz del lugar (si está definida): rutas relativas predecibles.
-        return _fmt(T.ejecutar(lg, comando, cwd=lg.raiz or None),
-                    max_salida=max_salida)
+        r = T.ejecutar(lg, cmd, cwd=lg.raiz or None, timeout=tope)
+        # Red de atrás: cmd falló por SU sintaxis (no por el comando) y el
+        # comando es de solo lectura => repetirlo en PowerShell es seguro.
+        if (shell == "auto" and not nota and getattr(lg, "es_windows", False)
+                and _huele_a_fallo_de_cmd(r) and _es_solo_lectura(comando)):
+            r = T.ejecutar(lg, _a_powershell(comando), cwd=lg.raiz or None,
+                           timeout=tope)
+            nota = ("[shell=auto: cmd falló por sintaxis/comando no reconocido; "
+                    "reintentado en PowerShell]")
+        salida = _fmt(r, max_salida=max_salida)
+        if r.codigo == 124:
+            salida += (
+                f"\nEse tope de {tope}s es de Witral, puesto por debajo del "
+                f"corte del cliente MCP (~60s) para que un comando largo se vea "
+                f"como timeout limpio y no como una llamada muerta. Para algo "
+                f"más largo: run_async(comando, confirmado=True) y después "
+                f"run_status(id) / run_esperar(id).")
+        return f"{nota}\n{salida}" if nota else salida
     except T.TransporteError as e:
         return f"error: {e}"
 
 
 @mcp.tool()
 def run_async(comando: str, donde: str = "local", confirmado: bool = False,
-              shell: str = "") -> str:
+              shell: str = "auto") -> str:
     """
     Lanza un comando LARGO en segundo plano (detached) y devuelve un id al
     instante. Es la forma correcta de correr trabajos de minutos: el cliente
@@ -688,15 +792,16 @@ def run_async(comando: str, donde: str = "local", confirmado: bool = False,
         return (
             f"CONFIRMACIÓN REQUERIDA{extra}: run_async ejecutará en segundo plano "
             f"en '{donde}':\n  {comando}\n"
-            f"Mostrá el comando al usuario y reintentá con confirmado=True."
+            f"Mostrar el comando al usuario y reintentar con confirmado=True."
         )
     try:
-        comando = _envolver_shell(lg, comando, shell)
+        comando, nota = _envolver_shell(lg, comando, shell)
     except ValueError as e:
         return f"error: {e}"
     try:
         jid = TR.lanzar(lg, comando)
-        return (f"Trabajo lanzado: id {jid} en {donde}.\n"
+        return ((nota + "\n" if nota else "") +
+                f"Trabajo lanzado: id {jid} en {donde}.\n"
                 f"Consultar con run_status(id=\"{jid}\", donde=\"{donde}\"); "
                 f"matar con run_matar si hace falta.")
     except T.TransporteError as e:
@@ -759,7 +864,7 @@ def run_matar(id: str, donde: str = "local", confirmado: bool = False) -> str:
     if not confirmado:
         return (f"CONFIRMACIÓN REQUERIDA: run_matar terminará el trabajo '{id}' "
                 f"en '{donde}' con todo su árbol de procesos. "
-                f"Reintentá con confirmado=True.")
+                f"Reintentar con confirmado=True.")
     try:
         return TR.matar(lg, id)
     except T.TransporteError as e:
@@ -790,7 +895,7 @@ def matar_proceso(patron: str, donde: str = "local", confirmado: bool = False) -
         return (
             f"CONFIRMACIÓN REQUERIDA: matar procesos que coincidan con "
             f"'{patron}' en '{donde}'.\n"
-            f"Confirmá con el usuario y reintentá con confirmado=True."
+            f"Confirmar con el usuario y reintentar con confirmado=True."
         )
     return _fmt(S.matar_proceso(lg, patron))
 
@@ -809,7 +914,7 @@ def servicio(accion: str, nombre: str, donde: str = "local",
         return (
             f"CONFIRMACIÓN REQUERIDA: '{accion}' sobre el servicio '{nombre}' "
             f"en '{donde}'.\n"
-            f"Confirmá con el usuario y reintentá con confirmado=True."
+            f"Confirmar con el usuario y reintentar con confirmado=True."
         )
     return _fmt(S.servicio(lg, accion, nombre))
 
@@ -827,7 +932,7 @@ def sql(donde: str, comando: str, confirmado: bool = False,
     Con VARIAS sentencias en una llamada se muestran TODOS los result sets.
     Lectura libre; las sentencias destructivas (UPDATE/DELETE/DROP/TRUNCATE/
     ALTER/INSERT/CREATE/MERGE/EXEC/BACKUP/RESTORE) requieren confirmado=True.
-    En un lugar NO sensible con bloque MIXTO, las LECTURAS corren al toque y la
+    En un lugar NO sensible con bloque MIXTO, las LECTURAS corren de inmediato y la
     confirmación se pide solo por las ESCRITURAS. En lugares sensibles,
     cualquier ejecución pide confirmación.
     'base': nombre de base alternativa del mismo lugar (override del -d).
@@ -846,6 +951,33 @@ def psql(donde: str, comando: str, confirmado: bool = False,
     return _correr_sql(donde, comando, confirmado, base)
 
 
+@mcp.tool()
+def sqlite(archivo: str, comando: str = "", donde: str = "local",
+           confirmado: bool = False, maximo: int = 50) -> str:
+    """
+    Consulta un ARCHIVO SQLite (no un servidor: sqlite es un archivo). Witral
+    corre en Python, así que usa el módulo sqlite3 de la stdlib — no hace falta
+    tener instalado el cliente sqlite3 ni escribir `python -c "import
+    sqlite3..."` a mano.
+
+    Es el motor que aparece en el mundo Android: la base de una app, un .db
+    traído del dispositivo con adb_pull(..., paquete=...) desde el sandbox
+    privado de una app debuggable.
+
+    Sin 'comando', lista las tablas de la base. Las LECTURAS abren el archivo
+    en modo solo-lectura (URI mode=ro), así una consulta no puede modificarlo
+    ni por error; las sentencias que escriben requieren confirmado=True.
+    'maximo' acota las filas mostradas.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        return DB.sqlite_consulta(lg, archivo, comando, confirmado, maximo)
+    except RutaFueraDeRaiz as e:
+        return f"error: {e}"
+
+
 def _correr_sql(donde: str, comando: str, confirmado: bool,
                 base: str) -> str:
     lg, aviso = _resolver(donde)
@@ -854,7 +986,7 @@ def _correr_sql(donde: str, comando: str, confirmado: bool,
     destructivo = DB.es_destructivo(comando)
     if (destructivo or lg.sensible) and not confirmado:
         # En un lugar NO sensible con bloque MIXTO (SELECT + UPDATE, etc.), no
-        # frenar por todo: correr las LECTURAS al toque y pedir confirmación
+        # frenar por todo: correr las LECTURAS de inmediato y pedir confirmación
         # solo por las ESCRITURAS. Así el SELECT no espera una segunda llamada.
         if destructivo and not lg.sensible:
             lecturas, escrituras = DB.separar_lectura_escritura(comando)
@@ -868,7 +1000,7 @@ def _correr_sql(donde: str, comando: str, confirmado: bool,
                     "LECTURAS ejecutadas (sin confirmación):\n" + salida +
                     "\n\nCONFIRMACIÓN REQUERIDA para las ESCRITURAS "
                     "(no se ejecutaron):\n" + ";\n".join(escrituras) + ";\n"
-                    f"Lugar: {donde}. Reintentá con confirmado=True para "
+                    f"Lugar: {donde}. Reintentar con confirmado=True para "
                     "aplicar el bloque completo."
                 )
         razon = []
@@ -879,7 +1011,7 @@ def _correr_sql(donde: str, comando: str, confirmado: bool,
         return (
             f"CONFIRMACIÓN REQUERIDA ({'; '.join(razon)}).\n"
             f"Sentencia: {comando}\nLugar: {donde}\n"
-            f"Mostrá esto al usuario y reintentá con confirmado=True."
+            f"Mostrar esto al usuario y reintentar con confirmado=True."
         )
     try:
         return _fmt(DB.psql_comando(lg, comando, base=base or None))
@@ -917,7 +1049,7 @@ def psql_aplicar(donde: str, ruta_sql: str, confirmado: bool = False,
         return (
             f"CONFIRMACIÓN REQUERIDA para aplicar migración{extra}.\n"
             f"Archivo: {ruta_sql}{de}\nLugar: {donde}{en_base}\n"
-            f"Mostrá al usuario qué se va a aplicar y reintentá con confirmado=True."
+            f"Mostrar al usuario qué se va a aplicar y reintentar con confirmado=True."
         )
     try:
         return _fmt(DB.psql_archivo(lg, ruta_sql, origen=org,
@@ -970,7 +1102,7 @@ def git_branch(repo: str, donde: str = "local") -> str:
 def git_show(repo: str, ref: str, donde: str = "local") -> str:
     """
     Muestra un commit (con --stat) o el CONTENIDO de un archivo en una rama/commit.
-    Para ver la versión de un archivo en otra rama (útil en merges), pasá
+    Para ver la versión de un archivo en otra rama (útil en merges), pasar
     'ref' como "rama:ruta" o "commit:ruta" (ej. "develop:app/src/Main.kt") y
     devuelve ese archivo tal cual está en esa rama. Sin ':' muestra el commit.
     """
@@ -1078,7 +1210,7 @@ def git_push(repo: str, donde: str = "local", forzar: bool = False,
         modo = " (FORZADO: reescribe la rama remota)" if forzar else ""
         return (
             f"CONFIRMACIÓN REQUERIDA: git push publica cambios desde '{donde}'{modo}.\n"
-            f"Confirmá con el usuario y reintentá con confirmado=True."
+            f"Confirmar con el usuario y reintentar con confirmado=True."
         )
     return _fmt(G.push(lg, repo, forzar))
 
@@ -1121,8 +1253,8 @@ def git_publicar(repo: str, mensaje: str, donde: str = "local", rutas: str = "",
                 pass
         return (
             f"CONFIRMACIÓN REQUERIDA: git_publicar hará commit y push desde "
-            f"'{donde}'{modo}.{nota_nuevos}\nConfirmá con el usuario y reintentá "
-            f"con confirmado=True. (O usá empujar=False para commitear solo local.)"
+            f"'{donde}'{modo}.{nota_nuevos}\nConfirmar con el usuario y reintentar "
+            f"con confirmado=True. (O usar empujar=False para commitear solo local.)"
         )
     lista = rutas.split() if rutas else None
     lista_excluir = excluir.split() if excluir else None
@@ -1143,7 +1275,7 @@ def git_reset_hard(repo: str, ref: str = "HEAD", donde: str = "local",
     if not confirmado:
         return (
             f"CONFIRMACIÓN REQUERIDA: reset --hard a {ref} DESCARTA cambios en '{donde}'.\n"
-            f"Confirmá con el usuario y reintentá con confirmado=True."
+            f"Confirmar con el usuario y reintentar con confirmado=True."
         )
     return _fmt(G.reset_hard(lg, repo, ref))
 
@@ -1228,7 +1360,7 @@ def ping(host: str, cuenta: int = 4, donde: str = "local") -> str:
 def http_request(url: str, metodo: str = "GET", cuerpo: str = "",
                  headers_json: str = "", params_json: str = "",
                  donde: str = "local", a_archivo: str = "",
-                 max_salida: int = 4000) -> str:
+                 max_salida: int = 4000, auth: str = "") -> str:
     """
     Petición HTTP/HTTPS desde un lugar. Solo a hosts que indique el usuario;
     nunca a URLs sacadas de archivos sin confirmar.
@@ -1248,6 +1380,13 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str = "",
     respuestas gigantes inline atascan el transporte MCP. Después procesar
     el archivo con leer / buscar_contenido / run.
     max_salida: tope de chars del cuerpo mostrado inline (trunca con aviso).
+
+    auth: autorización por NOMBRE de credencial guardada en el Credential
+    Manager de Windows — el token nunca pasa por la conversación ni por un
+    script temporal. Formas: "bearer:<cred>", "token:<cred>" (GitHub clásico),
+    "basic:<cred>" (usa el usuario de la credencial), "header:<Nombre>:<cred>".
+    Ver qué credenciales hay con la tool `secreto` (que tampoco muestra el
+    valor). El secreto se enmascara (····) en cualquier salida.
     """
     import json
     hdrs = json.loads(headers_json) if headers_json else None
@@ -1258,7 +1397,35 @@ def http_request(url: str, metodo: str = "GET", cuerpo: str = "",
     return R.http_request(url, metodo, cuerpo or None, hdrs,
                           params=prms, lugar=lg,
                           a_archivo=a_archivo or None,
-                          max_salida=max_salida)
+                          max_salida=max_salida, auth=auth)
+
+
+@mcp.tool()
+def secreto(nombre: str = "", filtro: str = "") -> str:
+    """
+    Credenciales guardadas en el Credential Manager de Windows, POR NOMBRE y
+    sin exponer el valor. Sin 'nombre': lista las credenciales genéricas
+    disponibles ('filtro' acota, admite * al final). Con 'nombre': dice si
+    existe, con qué usuario, cuántos caracteres mide y cuándo se escribió.
+
+    El valor NUNCA se devuelve: se usa pasarndolo por nombre a otra tool, hoy
+    http_request(..., auth="bearer:<nombre>"). Eso reemplaza el patrón de
+    escribir un script de PowerShell descartable para leer un token y probarlo.
+
+    Guardar una credencial (una vez, desde la terminal del usuario):
+      cmdkey /generic:<nombre> /user:<usuario> /pass
+    Alternativa sin Windows: variable de entorno WITRAL_SECRETO_<NOMBRE>.
+    Solo lectura, no pide confirmación.
+    """
+    from . import secretos as SEC
+    try:
+        if not nombre:
+            return SEC.listar(filtro)
+        return SEC.describir(nombre)
+    except SEC.SecretoNoEncontrado as e:
+        return f"error: {e}"
+    except Exception as e:
+        return f"error leyendo credenciales: {e}"
 
 
 @mcp.tool()
@@ -1282,7 +1449,7 @@ def sonar_archivo(ruta: str = "", proyecto: str = "",
     pasar aquí esa MISMA rama o los números van a ser de otra cosa. La salida
     siempre dice a qué rama corresponde.
 
-    OJO: refleja el ÚLTIMO análisis subido, no el working tree — tras
+    ATENCION: refleja el ÚLTIMO análisis subido, no el working tree — tras
     editar, refrescar con gradle_build(proyecto, "sonar") (~5 min).
     """
     return R.sonar_issues(ruta, proyecto, nuevos, rama)
@@ -1315,12 +1482,71 @@ def adb_shell(serial: str, comando: str, donde: str = "local") -> str:
 
 
 @mcp.tool()
-def adb_install(serial: str, apk: str, donde: str = "local") -> str:
-    """Instala un APK en el dispositivo (con -r)."""
+def adb_install(serial: str, apk: str, donde: str = "local",
+                permitir_downgrade: bool = False) -> str:
+    """
+    Instala un APK en el dispositivo (con -r). 'permitir_downgrade'=True agrega
+    -d, para instalar sobre una build con versionCode MAYOR sin desinstalar la
+    app ni perder sus datos.
+
+    Los fallos típicos de install se devuelven traducidos: qué significa
+    INSTALL_FAILED_VERSION_DOWNGRADE (hay una build más nueva instalada, y la
+    comparación es por versionCode, no por versionName), UPDATE_INCOMPATIBLE
+    (firma distinta), falta de espacio y equipo sin autorizar. El mensaje crudo
+    de adb no dice ninguna de esas causas.
+    """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
-    return _fmt(M.adb_install(lg, serial, apk))
+    return _fmt(M.adb_install(lg, serial, apk,
+                              permitir_downgrade=permitir_downgrade))
+
+
+@mcp.tool()
+def adb_estado_app(serial: str, paquete: str, donde: str = "local") -> str:
+    """
+    Qué build está instalada de un paquete: versionName, versionCode, minSdk /
+    targetSdk, cuándo se instaló y se actualizó, el instalador, la ruta del APK
+    y si es debuggable. Es la pregunta natural después de cada install, y a
+    mano son varios `dumpsys package | grep` seguidos. Solo lectura.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    return M.adb_estado_app(lg, serial, paquete)
+
+
+@mcp.tool()
+def adb_pull(serial: str, remoto: str, destino: str, paquete: str = "",
+             donde: str = "local") -> str:
+    """
+    Trae un archivo del dispositivo al lugar. Con 'paquete', usa run-as para
+    alcanzar el sandbox privado de una app DEBUGGABLE, que es donde viven sus
+    bases y preferencias y adonde un `adb pull` directo no llega.
+
+    Los bytes viajan crudos (exec-out, sin decodificar como texto), así un .db
+    o cualquier binario llega intacto. Después, para mirar una base:
+    sqlite(archivo, "SELECT ...").
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        return _fmt(M.adb_pull(lg, serial, remoto, destino, paquete))
+    except RutaFueraDeRaiz as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
+def adb_push(serial: str, origen: str, remoto: str, donde: str = "local") -> str:
+    """Sube un archivo del lugar al dispositivo (adb push)."""
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        return _fmt(M.adb_push(lg, serial, origen, remoto))
+    except RutaFueraDeRaiz as e:
+        return f"error: {e}"
 
 
 @mcp.tool()
@@ -1380,7 +1606,7 @@ def adb_ui(serial: str, solo_clickeables: bool = False, donde: str = "local") ->
     Vuelca el árbol de vistas (uiautomator dump) PARSEADO: por cada elemento con
     texto / content-desc / clickable, muestra el CENTRO (x,y) para tapear POR
     TEXTO en vez de por píxel, si es clickeable, su clase y su resource-id. Así,
-    si un botón se mueve, no te equivocás de coordenada, y podés decidir varios
+    si un botón se mueve, no se equivoca de coordenada, y se puede decidir varios
     pasos por llamada. Con 'solo_clickeables'=True filtra a los tapeables. Tras
     ubicar el centro, tapeás con adb_shell "input tap x y".
     """
@@ -1570,12 +1796,12 @@ def datastore_set(serial: str, paquete: str, archivo: str, clave: str,
         return aviso
     if not confirmado:
         return (
-            f"CONFIRMACIÓN REQUERIDA: vas a cambiar '{clave}' = '{valor}' "
+            f"CONFIRMACIÓN REQUERIDA: se va a cambiar '{clave}' = '{valor}' "
             f"(tipo {tipo}) en el datastore '{archivo}' del paquete '{paquete}' "
             f"en '{donde}'.\n"
             f"Modifica datos persistentes de la app. Se hace backup en /sdcard y "
             f"se detiene la app antes de escribir; después hay que relanzarla.\n"
-            f"Confirmá con el usuario y reintentá con confirmado=True."
+            f"Confirmar con el usuario y reintentar con confirmado=True."
         )
     return M.datastore_set(lg, serial, paquete, archivo, clave, valor, tipo)
 
@@ -1587,12 +1813,11 @@ def gradle_build(proyecto: str, tarea: str = "assembleDebug",
                  donde: str = "local") -> str:
     """
     Compila un proyecto con su gradlew. En local Windows se lanza como TRABAJO
-    asíncrono (con el fix del sandbox: JAVA_TOOL_OPTIONS redirige el socket
-    AF_UNIX de los pipes NIO fuera del TMP) y esta función RETORNA AL TOQUE
+    asíncrono y esta función RETORNA DE INMEDIATO
     con el id del trabajo: seguirlo con run_esperar(id) hasta el código final
-    (0 = BUILD SUCCESSFUL). Si falla, los errores de Kotlin son las líneas
-    'e:' del out.log del job. En unix/remoto compila síncrono y devuelve la
-    salida directamente.
+    (0 = BUILD SUCCESSFUL). Si falla, gradle_errores(job_id) devuelve las
+    líneas 'e:' deduplicadas — que salen por err.log, no por out.log. En
+    unix/remoto compila síncrono y devuelve la salida directamente.
     """
     lg, aviso = _resolver(donde)
     if aviso:
@@ -1603,20 +1828,54 @@ def gradle_build(proyecto: str, tarea: str = "assembleDebug",
         return f"error: {e}"
 
 
-# --- Búsqueda ---------------------------------------------------------------
-
 @mcp.tool()
-def buscar_nombre(proyecto: str, patron: str, donde: str = "local") -> str:
+def gradle_errores(job_id: str, donde: str = "local", maximo: int = 60) -> str:
     """
-    Busca por NOMBRE de archivo en un proyecto. El patrón es REGEX (ej. '\\.apk$'),
-    pero si no compila como regex y parece un glob (ej. '*.apk'), se interpreta
-    como glob automáticamente en vez de tirar error.
+    Los errores de compilación de un build lanzado como trabajo: las líneas
+    'e:' de los logs del job, DEDUPLICADAS y en orden, en una sola llamada.
+
+    Es lo primero que se quiere después de un build fallido. Mira err.log Y
+    out.log: Gradle emite los errores de Kotlin por stderr, así que están en
+    err.log — recordarlo mal costaba dos búsquedas. Si no hay líneas 'e:', cae
+    al bloque "What went wrong" de Gradle, que es lo que explica los fallos que
+    no son de compilación. Solo lectura.
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
-        return B.buscar_nombre(lg, proyecto, patron)
+        return M.gradle_errores(lg, job_id, maximo)
+    except T.TransporteError as e:
+        return f"error: {e}"
+
+
+# --- Búsqueda ---------------------------------------------------------------
+
+@mcp.tool()
+def buscar_nombre(objetivo: str = "", patron: str = "", donde: str = "local",
+                  proyecto: str = "") -> str:
+    """
+    Busca por NOMBRE de archivo bajo 'objetivo': un proyecto, o cualquier
+    carpeta del lugar. El patrón es REGEX (ej. '\\.apk$'), pero si no compila
+    como regex y parece un glob (ej. '*.apk'), se interpreta como glob
+    automáticamente en vez de dar error.
+
+    'objetivo' es el MISMO parámetro que usa buscar_contenido —dónde buscar—.
+    Antes esta tool lo llamaba 'proyecto' y la de al lado 'objetivo', dos
+    nombres para el mismo concepto. 'proyecto' se sigue aceptando como alias
+    para no romper llamadas viejas.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    donde_buscar = objetivo or proyecto
+    if not donde_buscar:
+        return ("error: falta 'objetivo' (la carpeta o proyecto donde buscar). "
+                "Es el mismo parámetro que usa buscar_contenido.")
+    if not patron:
+        return "error: falta 'patron' (regex o glob del nombre de archivo)."
+    try:
+        return B.buscar_nombre(lg, donde_buscar, patron)
     except RutaFueraDeRaiz as e:
         return f"error: {e}"
 

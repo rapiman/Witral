@@ -98,12 +98,15 @@ editadas +-2) para verificar en el acto sin un `leer` con rango aparte.
   - Reconoce: kt, kts, java, c, h, cpp, js, jsx, ts, php, py, sql, html, xml, css, sh, rb, pl,
     json, yaml, yml, toml.
   - No reemplaza al compilador. Para Kotlin (sin verificador nativo posible) da solo la universal,
-    que igual pilla el error de balance tipico.
+    que igual detecta el error de balance tipico.
 
 ### Busqueda
-- `buscar_nombre(proyecto, patron, donde)` — busca por NOMBRE de archivo en un proyecto. Es
-  REGEX (ej. `\.apk$`), pero si el patron no compila como regex y parece un glob (ej. `*.apk`)
-  se interpreta como glob automaticamente, sin tirar error.
+- `buscar_nombre(objetivo, patron, donde)` — busca por NOMBRE de archivo bajo `objetivo`: un
+  proyecto o cualquier carpeta del lugar. Es REGEX (ej. `\.apk$`), pero si el patron no compila
+  como regex y parece un glob (ej. `*.apk`) se interpreta como glob automaticamente, sin dar
+  error. **El parametro se llama `objetivo`, igual que en `buscar_contenido`** (ronda 15): antes
+  esta tool lo llamaba `proyecto` y la de al lado `objetivo`, dos nombres para el mismo
+  concepto. `proyecto` se sigue aceptando como alias.
 - `buscar_contenido(objetivo, patron, incluir, antes, despues, max_resultados, donde)` — grep
   de contenido (regex) en un ARCHIVO o una CARPETA/proyecto. Si `objetivo` es archivo, busca
   solo ahi (reemplaza al viejo `buscar_en_archivo`); si es carpeta, recorre recursivo con
@@ -135,14 +138,24 @@ Destructivo: `git_reset_hard` (confirmacion reforzada).
 llamada. Si se quiere a mano: `git_status` -> `git_add` -> `git_diff` -> `git_commit` -> `git_push`.
 
 ### Ejecucion y sistema (segun el SO del lugar)
-- `run(comando, donde, confirmado, max_salida)` — comando arbitrario en un lugar. Escotilla
-  general; pide `confirmado=True` SALVO que sea claramente de SOLO LECTURA en un lugar no
-  sensible (allowlist: `git status/log/diff/show/branch`, `ls`, `dir`, `cat`, `findstr`,
-  `grep`, `head`, `tail`, etc., encadenados solo con `&&`/`;`, sin redirecciones/pipes/
-  background) — ahi corre sin confirmacion. El cwd es la RAIZ del lugar (rutas relativas
-  predecibles). `max_salida` trunca la salida con aviso. Preferir las tools tipadas
-  cuando existan. SOLO para comandos CORTOS (<~45s): el cliente MCP corta las llamadas
-  largas — para trabajos largos usar `run_async`.
+- `run(comando, donde, confirmado, max_salida, shell, segundos)` — comando arbitrario en un
+  lugar. Escotilla general; pide `confirmado=True` SALVO que sea claramente de SOLO LECTURA
+  en un lugar no sensible (allowlist: `git status/log/diff/show/branch`, `ls`, `dir`, `cat`,
+  `findstr`, `grep`, `head`, `tail`, etc., encadenados solo con `&&`/`;`, sin redirecciones/
+  pipes/background) — ahi corre sin confirmacion. El cwd es la RAIZ del lugar (rutas
+  relativas predecibles). `max_salida` trunca la salida con aviso. Preferir las tools
+  tipadas cuando existan.
+  **`segundos`** (por defecto y tope 45, ronda 14): TOPE PROPIO de Witral, puesto por debajo
+  del corte del cliente MCP (~60s). Al pasarse devuelve codigo 124 con el aviso de saltar a
+  `run_async`, en vez de que la llamada muera sin salida ni diagnostico. Para trabajos
+  largos, `run_async` desde el principio.
+  **`shell`** (ronda 14): ahora **`"auto"` por defecto** — corre en cmd salvo que detecte una
+  construccion con la que cmd pelea (alternacion `\|` de findstr, `%%` de los for, comillas
+  dobles anidadas o escapadas, comillas simples como agrupador), y ahi envuelve en PowerShell
+  avisandolo en la salida. Ademas, si cmd falla por SU sintaxis o por comando no reconocido
+  Y el comando es de solo lectura, reintenta solo en PowerShell (repetir una lectura es
+  inocuo). Con `&&` o `||` NUNCA desvia: PowerShell 5.1 no los soporta. `"powershell"`
+  fuerza, `"cmd"` desactiva el desvio. Ya no hace falta caer a mano al PowerShell.
 - `run_async(comando, donde, confirmado)` — lanza un comando LARGO en segundo plano
   (detached) y devuelve un id al instante. `run_status(id, donde, lineas)` — estado +
   codigo + ultimas lineas de out/err (sin id: lista los trabajos del lugar; lectura
@@ -174,6 +187,15 @@ llamada. Si se quiere a mano: `git_status` -> `git_add` -> `git_diff` -> `git_co
   Requiere `confirmado=True` (escribe en server + reinicia servicio); corta y reporta si un
   paso falla.
 
+### SQLite (un archivo, no un servidor)
+- `sqlite(archivo, comando, donde, confirmado, maximo)` (ronda 15) — consulta un `.db`. Witral
+  ya corre en Python, asi que usa el modulo `sqlite3` de la stdlib: no hace falta el cliente
+  externo ni escribir `python -c "import sqlite3..."` a mano. Es el motor que aparece en el
+  mundo Android: la base de una app, o un `.db` traido con `adb_pull(..., paquete=...)`.
+  Sin `comando`, lista las tablas. Las LECTURAS abren el archivo en modo **solo-lectura**
+  (URI `mode=ro`), asi una consulta no puede modificarlo ni por error; lo que escribe pide
+  `confirmado=True`.
+
 ### Base de datos (cliente nativo del motor, en un lugar)
 El MOTOR es un eje mas, igual que `donde`: sale de la config del lugar (`db.motor`) y
 decide que cliente nativo se invoca. Soportados: **postgres** (`psql`) y **sqlserver**
@@ -182,7 +204,7 @@ decide que cliente nativo se invoca. Soportados: **postgres** (`psql`) y **sqlse
   cliente que corresponda al motor. Con varias sentencias en una llamada se muestran
   TODOS los result sets. `base` apunta a otra base del mismo lugar (override del -d).
   En lugar NO sensible con bloque MIXTO (SELECT + UPDATE), sin `confirmado` corre las
-  LECTURAS al toque y pide confirmacion solo por las ESCRITURAS (se acabo el doble viaje
+  LECTURAS de inmediato y pide confirmacion solo por las ESCRITURAS (se acabo el doble viaje
   por un SELECT escondido). Ante caida de conexion (WinError 10054, communication link
   failure), reintenta una vez SOLO las lecturas.
 - `psql(...)` — alias historico de `sql`, comportamiento identico. Para codigo nuevo,
@@ -192,7 +214,7 @@ decide que cliente nativo se invoca. Soportados: **postgres** (`psql`) y **sqlse
   confirmacion de mas: sale mas barato que escribir de menos.
 - Una base SQL Server alcanzable por RED (VPN/LAN) se modela como un lugar **local** con
   bloque `db` apuntando al host: el cliente corre en esta maquina. No hace falta SSH.
-- OJO sqlcmd: **ignora la codepage de entrada cuando el SQL va por stdin** y destroza el
+- ATENCION sqlcmd: **ignora la codepage de entrada cuando el SQL va por stdin** y destroza el
   no-ASCII (una `ñ` entra rota y queda rota EN LA BASE). Por eso en local Windows Witral
   deja el SQL en un temporal UTF-8 con BOM bajo `<raiz>\.witral\tmp\`, lo pasa con `-i` y
   lo borra despues. No "arreglar" esto volviendo a stdin.
@@ -226,14 +248,43 @@ decide que cliente nativo se invoca. Soportados: **postgres** (`psql`) y **sqlse
   de la respuesta en esa ruta del lugar y devuelve solo status + tamano + ruta — **usar
   para respuestas grandes** (JSON de APIs, dumps): inline atascan el transporte MCP.
   Despues procesar el archivo con `leer`/`buscar_contenido`/`run`. `max_salida` acota el
-  cuerpo inline (trunca con aviso).
+  cuerpo inline (trunca con aviso). **`auth`** (ronda 14): autorizacion por NOMBRE de
+  credencial, sin que el token pase por la conversacion — `"bearer:<cred>"`,
+  `"token:<cred>"` (GitHub clasico), `"basic:<cred>"` (usa el usuario guardado en la
+  credencial) o `"header:<Nombre>:<cred>"`. El valor se enmascara (····) en toda salida.
+
+### Secretos (Credential Manager de Windows)
+- `secreto(nombre, filtro)` — credenciales guardadas, POR NOMBRE y **sin exponer el valor
+  nunca**. Sin `nombre`: lista las genericas disponibles. Con `nombre`: si existe, con que
+  usuario, cuantos caracteres mide y cuando se escribio. Solo lectura, sin confirmacion.
+- El valor se usa pasandolo por nombre a otra tool: hoy `http_request(..., auth="bearer:X")`.
+  Eso reemplaza el patron de escribir un script de PowerShell descartable para leer un token
+  del Credential Manager y probarlo (scripts que despues hay que acordarse de borrar).
+- Guardar una credencial es cosa del usuario, una vez, en su terminal:
+  `cmdkey /generic:<nombre> /user:<usuario> /pass`. Alternativa sin Windows: variable de
+  entorno `WITRAL_SECRETO_<NOMBRE>`.
+
 
 ### Android / ADB
 - `adb_devices(donde)` — lista dispositivos.
 - `adb_shell(serial, comando, donde)` — comando en el dispositivo.
-- `adb_install(apk, serial, donde)` — instala un APK (acepta ruta relativa o absoluta).
-  Encabeza la respuesta con `Dispositivo: <modelo> (serial <serial>)` — util cuando el POS
-  cambia de serial entre pruebas y eso explica params/estado inesperados.
+- `adb_install(apk, serial, donde, permitir_downgrade)` — instala un APK (acepta ruta relativa
+  o absoluta). Encabeza la respuesta con `Dispositivo: <modelo> (serial <serial>)` — util cuando
+  el POS cambia de serial entre pruebas y eso explica params/estado inesperados.
+  `permitir_downgrade=True` (ronda 15) agrega `-d` para instalar sobre una build con
+  versionCode MAYOR sin desinstalar ni perder datos. Los fallos vuelven TRADUCIDOS:
+  `INSTALL_FAILED_VERSION_DOWNGRADE` explica que la comparacion es por versionCode y no por
+  versionName, `UPDATE_INCOMPATIBLE` que la firma es otra, mas falta de espacio y equipo sin
+  autorizar. El mensaje crudo de adb no dice ninguna de esas causas.
+- `adb_estado_app(serial, paquete, donde)` (ronda 15) — que build esta instalada: versionName,
+  versionCode, minSdk/targetSdk, firstInstallTime, lastUpdateTime, instalador, ruta del APK y
+  si es debuggable. Es la pregunta natural DESPUES de cada install; a mano son varios
+  `dumpsys package | grep` seguidos.
+- `adb_pull(serial, remoto, destino, paquete, donde)` · `adb_push(serial, origen, remoto, donde)`
+  (ronda 15) — traer y llevar archivos. Con `paquete`, el pull usa `run-as` para alcanzar el
+  sandbox privado de una app DEBUGGABLE (donde `adb pull` directo no llega) y los bytes viajan
+  CRUDOS por `exec-out`: un `.db` llega intacto en vez de destrozado por la decodificacion de
+  texto. Despues se mira con `sqlite`.
 - `adb_forcestop(serial, paquete, donde)` · `adb_relanzar(serial, paquete, donde)`.
 - `adb_logcat(serial, tags, nivel, lineas, limpiar_antes, donde)` — captura logcat en modo dump
   (vuelca y sale, no streaming). `tags` filtra por tag separado por comas (ej.
@@ -294,11 +345,17 @@ app **debuggable** (en release no hay acceso).
 
 ### Build
 - `gradle_build(proyecto, tarea, donde)` — compila con el `gradlew` del proyecto. En unix/remoto
-  compila sincrono y devuelve la salida. **En local Windows compila como TRABAJO asincrono**
-  (con el fix del sandbox de la ronda 10: JAVA_TOOL_OPTIONS redirige el socket AF_UNIX de los
-  pipes NIO fuera del TMP): devuelve el id al toque; por mientras se puede seguir con otras
-  tareas y mirar con `run_status(id)`, o `run_esperar(id)` si no hay nada mas; codigo 0 =
-  BUILD SUCCESSFUL; errores de Kotlin = lineas `e:` del out.log del job.
+  compila sincrono y devuelve la salida. **En local Windows compila como TRABAJO asincrono**:
+  devuelve el id de inmediato; por mientras se puede seguir con otras tareas y mirar con
+  `run_status(id)`, o `run_esperar(id)` si no hay nada mas; codigo 0 = BUILD SUCCESSFUL.
+  (El fix del sandbox de la JVM ya NO vive aca sino en el transporte — ronda 15 — asi que
+  `run` y `run_async` lo tienen igual: ver seccion 4.)
+- `gradle_errores(job_id, donde, maximo)` (ronda 15) — los errores de compilacion del build en
+  UNA llamada: las lineas `e:` de los logs del job, deduplicadas y en orden. Mira err.log Y
+  out.log, porque **Gradle emite los errores de Kotlin por stderr**: estan en `err.log`, no en
+  `out.log` (el mensaje anterior mandaba al log equivocado). Si no hay lineas `e:`, cae al
+  bloque `FAILURE:` / "What went wrong" de Gradle, que es lo que explica los fallos que no son
+  de compilacion.
 
 ---
 
@@ -336,6 +393,15 @@ app **debuggable** (en release no hay acceso).
 | Compilar Android en local Windows            | `gradle_build` -> `run_esperar(id)`   |
 | Consultar una base (cualquier motor)         | `sql(donde, comando)`                 |
 | Comando arbitrario (ultimo recurso)          | `run` (siempre confirmado)            |
+| Ver por que fallo un build                   | `gradle_errores(job_id)`              |
+| Saber que build esta instalada en el POS     | `adb_estado_app(serial, paquete)`     |
+| Instalar sobre una version mas nueva         | `adb_install(..., permitir_downgrade=True)` |
+| Traer la base de una app del dispositivo     | `adb_pull(..., paquete=...)` -> `sqlite` |
+| Mirar un archivo .db                         | `sqlite(archivo, "SELECT ...")`       |
+| Comando que pelea con cmd (comillas, findstr)| `run` tal cual (`shell="auto"` ya desvia) |
+| Usar un token sin exponerlo                  | `http_request(auth="bearer:<cred>")`  |
+| Ver que credenciales hay guardadas           | `secreto()` (nunca muestra el valor)  |
+| Leer un archivo grande sin pelear con el puente | stagearlo al sandbox (ver receta)  |
 
 ---
 
@@ -346,9 +412,12 @@ app **debuggable** (en release no hay acceso).
   que los pipes NIO de Java (JDK 16+) crean en el TMP, donde el sandbox del cliente
   MCP lo rompe con EINVAL (diagnostico: TCP loopback de Java funciona, AF_UNIX en
   Proyectos funciona, AF_UNIX en TMP falla). Fix: `JAVA_TOOL_OPTIONS` con
-  `-Djdk.net.unixdomain.tmpdir=<raiz>\.witral\tmpjava` — lo pone `gradle_build`
-  automaticamente y el build corre como trabajo asincrono (`run_esperar(id)` para
-  seguirlo). Segundo obstaculo (tambien resuelto): hay proyectos que fijan
+  `-Djdk.net.unixdomain.tmpdir=<raiz>\.witral\tmpjava`. **Desde la ronda 15 ese fix vive
+  en el TRANSPORTE** (`transporte.entorno_jvm`), no en `gradle_build`: lo aplican por igual
+  `run`, `run_async` y los trabajos. Antes estaba solo en `gradle_build`, y por eso el mismo
+  `gradlew --stop` moria por `run` con "Unable to establish loopback connection" y funcionaba
+  por `gradle_build` — una diferencia entre dos tools del mismo servidor que no habia forma
+  de adivinar la primera vez. Segundo obstaculo (tambien resuelto): hay proyectos que fijan
   `kotlin.compiler.execution.strategy=in-process` en gradle.properties, que con
   metaspace 512m muere con OOM; `gradle_build` agrega
   `-Pkotlin.compiler.execution.strategy=daemon` (el daemon de Kotlin usa TCP
@@ -385,7 +454,7 @@ app **debuggable** (en release no hay acceso).
   Descubierto en la instalacion de finoli (2026-08-07); aplica a cualquier maquina Windows.
 - **`ssh-keygen` no se puede correr por `run`** (cmd sin TTY): devuelve codigo 0 y no genera
   nada. Se le pide al usuario en SU PowerShell, en forma interactiva (Enter dos veces para
-  passphrase vacia). Ojo: `-N ""` desde PowerShell tampoco sirve — el argumento vacio se
+  passphrase vacia). Atencion: `-N ""` desde PowerShell tampoco sirve — el argumento vacio se
   pierde antes de llegar al ejecutable nativo.
 - **Comandos multilinea en `run`**: no funcionan. Encadenar con `&` en UNA sola linea, o
   usar `shell="powershell"`.
@@ -408,7 +477,7 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
   devolver el control y hacer otras cosas por mientras (mas ediciones, revisar logs,
   responder); recien al necesitar el resultado, `run_status(id)` (no bloquea). Reservar
   `run_esperar(id)` para cuando no queda otra tarea util y solo falta que termine.
-- OJO en Windows: `timeout /t` NO sirve dentro de un job (no soporta stdin redirigido);
+- ATENCION en Windows: `timeout /t` NO sirve dentro de un job (no soporta stdin redirigido);
   para esperas usar `powershell -NoProfile -Command "Start-Sleep N"`.
 
 **Traer datos DESDE el sandbox de analisis de Claude a un lugar.**
@@ -423,6 +492,13 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
 - ALTERNATIVA: `leer cola=N` para el final; `leer desde/hasta` por tramos;
   `buscar_contenido` (regex, acepta archivo o carpeta) como grep; o procesar EN el lugar
   (`run` con awk/python) y traer solo el resumen.
+- MEJOR TODAVIA cuando Claude corre EN LA NUBE (Cowork) y el archivo esta en local: no
+  leerlo por rangos sobre el puente, sino **stagearlo de una** al sandbox de Claude
+  (`device_stage_files` del puente de dispositivos) y ahi leerlo/grepearlo con las tools
+  del sandbox, que no dependen del puente. Requiere que la carpeta este conectada
+  (`device_request_folder_access` sobre la raiz de Proyectos, una vez por sesion). Un
+  archivo de miles de lineas pasa a ser UNA transferencia en vez de N llamadas, y cada
+  llamada de menos es una oportunidad de menos de que el puente se caiga en el medio.
 
 **Respuestas HTTP grandes (APIs con JSON de cientos de KB).**
 - NO SE PUEDE: traerlas inline — atascan el transporte MCP (timeout de 4 min).
@@ -475,7 +551,7 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
 - USO NATURAL: consultar el archivo ANTES de tocarlo (foto de sus issues) y re-consultar
   despues del proximo analisis. Para el usuario en terminal existe el equivalente
   `herramientas\sonar_archivo.ps1 <ruta>` (mismo comportamiento, -Nuevos, -Proyecto).
-- OJO: SonarCloud refleja el ULTIMO analisis subido, no el working tree. Tras editar, los
+- ATENCION: SonarCloud refleja el ULTIMO analisis subido, no el working tree. Tras editar, los
   hallazgos nuevos y las lineas corridas recien aparecen al correr
   `gradle_build(proyecto, "sonar")` de nuevo (~5 min). Flujo: consultar antes de tocar ->
   editar -> compilar -> sonar -> re-consultar.
@@ -489,8 +565,24 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
   ciegas una accion con efectos (commit, push, migracion) sin mirar el estado antes.
 - Preferir llamadas cortas y de un solo paso cuando el cliente ande inestable.
 
+**"The device is not connected to the bridge" (Claude en la nube, Cowork).**
+- QUE ES: el puente entre el sandbox de Claude y el Claude Desktop del usuario, NO Witral.
+  Witral esta corriendo del otro lado sin enterarse; el corte esta en el transporte. Por eso
+  no hay reintento que Witral pueda hacer: cuando el puente se cae, la llamada ni siquiera
+  llega. Reconecta solo, en general en segundos.
+- QUE SI ES DE WITRAL, y esta cubierto: el estado de los trabajos vive en disco
+  (`.witral/jobs/<id>/`), asi que un `run_async` lanzado antes del corte sigue corriendo y se
+  consulta despues con `run_status(id)`, incluso desde otra conversacion. Los backups de
+  cada edicion tambien estan en disco. Nada de lo que estaba en vuelo se pierde por el corte.
+- COMO OPERAR: llamadas CORTAS y de un solo paso (cada llamada es una exposicion); despues de
+  un corte, verificar con una tool liviana ANTES de reintentar algo con efectos; para lo
+  largo, `run_async` en vez de `run` (el trabajo sobrevive al corte, la llamada no); para
+  leer mucho, stagear al sandbox (ver "Archivos grandes") en vez de N lecturas por rango.
+- El tope de 45s de `run` (ronda 14) juega para el mismo lado: un comando que se pasa vuelve
+  como timeout limpio y accionable, no como una llamada que se muere sin decir nada.
+
 **Siempre.**
-- `run`/`run_async` piden `confirmado=True`: proponer el comando y esperar el "dale".
+- `run`/`run_async` piden `confirmado=True`: proponer el comando y esperar la confirmacion explicita.
 - El cwd de `run`/`run_async` es la raiz del lugar: usar rutas relativas a ella.
 - Editar codigo con `editar_literal`/`editar_linea` + `verificar=True` (chequeo de
   sintaxis en el mismo viaje); los backups quedan en `.witral/bak/`.
@@ -518,7 +610,78 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
 
 ## 7. ESTADO Y PENDIENTES (para retomar desde otra conversacion)
 
-### Ultima sesion (2026-08-11, ronda 13: motor sqlserver + lugares SAAM/EAM)
+### Ultima sesion (2026-08-18, ronda 15: bugs y fricciones de dos jornadas Android/POS)
+
+Tres bugs, cuatro fricciones y una pasada de idioma. Validado con
+`server/pruebas_ronda15.py` (45 aserciones, todas OK) y con `import witral.server` limpio.
+
+1. **`run_esperar` ya no puede afirmar tres cosas incompatibles.** Reportaba a la vez "sin
+   codigo y proceso no encontrado", `BUILD SUCCESSFUL` y "sigue CORRIENDO". Eran tres
+   fuentes separadas: el estado miraba solo si existia el archivo `codigo`, el log se
+   volcaba crudo, y el pie de "volver a llamar" se decidia por reloj. Ahora hay UNA funcion
+   (`trabajos._diagnostico_local`) que decide entre `no_existe | corriendo | terminado |
+   terminado_sin_codigo` mirando las tres entradas —archivo `codigo`, proceso vivo, cierre
+   del log— y todo el texto se deriva de ella: si el estado es terminal, el pie de "volver a
+   llamar" es inalcanzable. Cuando el proceso ya no esta y el log cierra en `BUILD
+   SUCCESSFUL`/`BUILD FAILED`, se informa el codigo INFERIDO en vez de declarar "abortado".
+   **Causa raiz encontrada**: en batch, invocar otro `.bat`/`.cmd` sin `call` TRANSFIERE el
+   control y el script que llama nunca retoma — con el comando inline, `gradlew.bat`
+   terminaba el wrapper y la linea que escribe `codigo` no llegaba a correr. El comando
+   ahora va en su propio `.cmd` invocado con `call`.
+2. **El fix del sandbox de la JVM se mudo al transporte** (ver seccion 4).
+3. **Los errores de Kotlin estan en `err.log`, no en `out.log`** (Gradle los emite por
+   stderr). Corregido el mensaje y, mejor, agregada `gradle_errores(job_id)` para no
+   depender de recordarlo.
+4. `adb_install(..., permitir_downgrade=True)` y traduccion de los fallos de install;
+   `adb_estado_app`; `adb_pull`/`adb_push` (con `run-as` y bytes crudos); tool `sqlite`.
+5. `buscar_nombre` recibe `objetivo`, igual que `buscar_contenido` (`proyecto` sigue como
+   alias), y la descripcion de `run` dice explicitamente que en Windows el shell es cmd y no
+   bash: no hay heredocs (`<<EOF` muere con "no se esperaba << en este momento"), y la
+   alternativa es `shell="powershell"` con here-string o escribir el archivo aparte.
+6. **Idioma**: pasada de voseo a español neutro sobre las descripciones de tools y la
+   documentacion (96 reemplazos, script `server/neutralizar_idioma.py`, reejecutable). Las
+   entradas viejas del CHANGELOG quedan como historia.
+
+PENDIENTE: reinicio completo de Claude Desktop + conversacion nueva (hay tools NUEVAS:
+`gradle_errores`, `adb_estado_app`, `adb_pull`, `adb_push`, `sqlite`, y `secreto` de la
+ronda 14). Despues, verificacion en vivo y commit.
+
+### Sesion anterior (2026-08-18, ronda 14: feedback de una sesion Android/POS)
+
+Feedback de una sesion larga (git + gradle + adb + datastore + edicion). Lo que brillo
+quedo como esta: `datastore_get/set`, `adb_captura` devolviendo la imagen, `adb_ui` con
+coordenadas parseadas, `run_esperar`, `git_publicar`, el backup de cada `editar_literal` y
+el eje `donde`. Lo que rozo, atendido asi:
+
+1. **`run` con tope propio (`segundos`, por defecto y tope 45).** Antes `run` esperaba 120s
+   internos mientras el cliente MCP cortaba a los ~60: el resultado era una llamada muerta.
+   Ahora Witral corta primero y devuelve codigo 124 con el aviso de saltar a `run_async`.
+2. **`shell="auto"` por defecto.** Detecta las construcciones con las que cmd pelea
+   (alternacion `\|` de findstr, `%%`, comillas anidadas/escapadas, comillas simples como
+   agrupador) y envuelve en PowerShell avisandolo; ademas reintenta en PowerShell si cmd
+   fallo por SU sintaxis o por comando no reconocido y el comando era de solo lectura. Con
+   `&&`/`||` nunca desvia (PowerShell 5.1 no los soporta) y `%VAR%` tampoco cuenta como
+   pelea (ahi cmd es lo que se quiso). Ya no hace falta pasar `shell="powershell"` a mano.
+3. **Tool `secreto` + `http_request(auth=...)`.** Lee el Credential Manager de Windows por
+   ctypes (`CredReadW`/`CredEnumerateW`, sin dependencias) y NUNCA devuelve el valor: solo
+   metadatos. El valor se usa por nombre en `auth="bearer:<cred>"` / `token:` / `basic:` /
+   `header:<Nombre>:<cred>`, y se enmascara en toda salida. Cierra el hueco que llevaba a
+   escribir scripts de PowerShell descartables para leer un token y probarlo.
+4. **Puente inestable y archivos grandes**: no es codigo, es receta (seccion 5). El corte
+   es del puente Cowork↔Desktop, no de Witral; lo que Witral aporta ya esta (estado de
+   trabajos en disco, backups). La receta nueva es stagear el archivo grande al sandbox en
+   vez de leerlo por rangos sobre un puente que se cae.
+
+Validacion: `witral/server/pruebas_ronda14.py` (logica pura de `_motivo_powershell`,
+`_envolver_shell`, `_huele_a_fallo_de_cmd`, parsing de `auth` y enmascarado, mas una
+verificacion en vivo de que la estructura ctypes del Credential Manager responde).
+PENDIENTE reinicio completo de Claude Desktop + conversacion nueva (hay una tool NUEVA,
+`secreto`, y firmas cambiadas en `run`/`run_async`/`http_request`).
+
+ATENCION: la copia `Proyectos\WITRAL_PARA_CLAUDE.md` (fuera del repo) quedo congelada en la
+ronda 11. La version vigente es esta, la del repo.
+
+### Sesion anterior (2026-08-11, ronda 13: motor sqlserver + lugares SAAM/EAM)
 
 Witral pasa de "solo postgres" a "el motor es un eje". Detalle completo en el
 CHANGELOG (ronda 13). Resumen operativo:
@@ -639,7 +802,7 @@ reinicio + conversacion nueva (hay tools NUEVAS). Cambios:
    "idea casi gratis" de la ronda 8; el feedback lo daba por existente.
 7. **Verbo `pin` + variables `$nombre`** (pedido del usuario): hay PIN sin
    valor de seguridad (menu/config del POS) que la maquina SI puede tipear,
-   con un dale. `pin $clave` en el guion + `adb_guion(..., confirmado=True,
+   con una confirmacion explicita. `pin $clave` en el guion + `adb_guion(..., confirmado=True,
    valores="clave=1234")`: un confirmado habilita los pin de la corrida; sin
    el, el guion PAUSA en ese paso (reintentar con confirmado, o tipear a mano
    y desde=N+1). El valor vive SOLO en la llamada de la conversacion — ni en
@@ -973,14 +1136,14 @@ esa máquina, no copiando la privada:
 - El repo witral quedó: remoto git@github.com:rapiman/Witral.git y
   core.sshCommand "C:/PROGRA~1/Git/usr/bin/ssh.exe
   -i C:/Users/insan/.ssh/id_ed25519_rapiman -o IdentitiesOnly=yes".
-- OJO: ahí el binario NO es el ssh de Windows sino el que trae Git, porque el
+- ATENCION: ahí el binario NO es el ssh de Windows sino el que trae Git, porque el
   de System32 no funciona bajo el sandbox del cliente MCP (ver sección 4). La
   ruta corta 8.3 PROGRA~1 evita las comillas anidadas del espacio en
   "Program Files", que se pierden al pasar por cmd/PowerShell.
 
 Diagnóstico útil si vuelve a fallar: `ssh -T git@github.com` dice con qué
 cuenta autentica la llave por defecto; `cmdkey /list | findstr github`
-muestra los tokens HTTPS. OJO Witral: ssh-keygen y otros comandos que
+muestra los tokens HTTPS. ATENCION Witral: ssh-keygen y otros comandos que
 piden input interactivo NO funcionan vía run local (cmd sin TTY) — esos
 se le piden al usuario en PowerShell.
 

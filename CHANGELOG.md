@@ -7,6 +7,137 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 15 — el estado de un trabajo deja de contradecirse; ADB y sqlite
+
+**Corregido**
+- `run_esperar` reportaba a la vez "sin código y proceso no encontrado",
+  `BUILD SUCCESSFUL` en el log y "sigue CORRIENDO". Tres afirmaciones
+  incompatibles porque venían de tres lugares: el estado miraba solo si existía
+  el archivo `codigo`, el log se volcaba crudo, y el pie de "volver a llamar" se
+  decidía por reloj. Ahora `trabajos._diagnostico_local` es el ÚNICO que decide
+  —entre `no_existe`, `corriendo`, `terminado` y `terminado_sin_codigo`— mirando
+  archivo de código, proceso vivo y cierre del log; el resto del texto se deriva
+  de ahí, así que un estado terminal no puede imprimir el pie de "volver a
+  llamar". Cuando el proceso ya no está y el log cierra en `BUILD SUCCESSFUL` /
+  `BUILD FAILED`, se informa el código inferido en vez de declarar "abortado".
+- **Causa raíz de que faltara el código**: en batch, invocar otro `.bat`/`.cmd`
+  sin `call` transfiere el control y el script que llama nunca retoma. Con el
+  comando inline en el wrapper, un `gradlew.bat` terminaba el wrapper entero y
+  la línea que escribe `codigo` no llegaba a ejecutarse: el build terminaba
+  bien, el proceso desaparecía y el trabajo quedaba para siempre sin código. El
+  comando ahora va en su propio `.cmd` invocado con `call`.
+- El fix del sandbox de la JVM (`-Djdk.net.unixdomain.tmpdir`) se mudó de
+  `gradle_build` a `transporte.entorno_jvm`, y lo aplican por igual `run`,
+  `run_async` y los trabajos. Tenerlo en una sola tool era una trampa: el mismo
+  `gradlew --stop` moría por `run` con *"Unable to establish loopback
+  connection"* y funcionaba por `gradle_build`, sin forma de saberlo la primera
+  vez.
+- Los errores de compilación de Kotlin salen por **stderr**, o sea `err.log`, no
+  `out.log`. El mensaje de `gradle_build` afirmaba lo contrario y mandaba a
+  buscar donde no estaban.
+
+**Añadido**
+- `gradle_errores(job_id)` — las líneas `e:` del job, deduplicadas y en orden,
+  mirando los dos logs. Si no hay ninguna, cae al bloque `FAILURE:` /
+  "What went wrong", que explica los fallos que no son de compilación.
+- `adb_install(..., permitir_downgrade=True)` (`-d`) y traducción de los fallos
+  cuya causa real no se deduce del mensaje de adb:
+  `INSTALL_FAILED_VERSION_DOWNGRADE` (hay una build con versionCode mayor, y la
+  comparación es por versionCode, no por versionName), `UPDATE_INCOMPATIBLE`
+  (firma distinta), falta de espacio, equipo sin autorizar.
+- `adb_estado_app(serial, paquete)` — versionName, versionCode, minSdk/targetSdk,
+  firstInstallTime, lastUpdateTime, instalador, ruta del APK y si es debuggable.
+- `adb_pull` / `adb_push`. Con `paquete`, el pull usa `run-as` para alcanzar el
+  sandbox privado de una app debuggable, y los bytes viajan crudos por
+  `exec-out`: un `.db` llega intacto en vez de destrozado por la decodificación
+  de texto del transporte.
+- `sqlite(archivo, comando)` — cliente SQLite con el módulo `sqlite3` de la
+  stdlib, sin dependencias ni cliente externo. Es el motor que aparece en el
+  mundo Android. Las lecturas abren el archivo en modo solo-lectura (URI
+  `mode=ro`); lo que escribe pide `confirmado=True`.
+
+**Cambiado**
+- `buscar_nombre` recibe `objetivo`, el mismo nombre que usa `buscar_contenido`
+  para el mismo concepto, y acepta cualquier carpeta. `proyecto` sigue como
+  alias.
+- La descripción de `run` dice explícitamente que en Windows el shell es cmd y
+  no bash: sin heredocs (`<<EOF` muere con *"no se esperaba << en este
+  momento"*), y con la alternativa concreta (here-string de PowerShell, o
+  escribir el archivo y ejecutarlo).
+- **Idioma**: pasada de voseo rioplatense a español neutro sobre descripciones
+  de tools y documentación, con construcciones impersonales en infinitivo. El
+  script `server/neutralizar_idioma.py` es reejecutable e informa antes de
+  aplicar. Las entradas previas de este CHANGELOG quedan como historia.
+
+**Pruebas**
+- `server/pruebas_ronda15.py`: los seis estados de un trabajo (incluido el caso
+  exacto del reporte: proceso muerto, sin código, log en BUILD SUCCESSFUL),
+  que un estado terminal no imprima el pie de "volver a llamar", deduplicación
+  y fallback de `gradle_errores`, los diagnósticos de install, el parseo de
+  `dumpsys`, sqlite (lectura protegida, escritura confirmada, base inexistente)
+  y `entorno_jvm`.
+
+### Ronda 14 — feedback de sesión Android/POS: el shell deja de pelear, los secretos dejan de andar sueltos
+
+Feedback de una sesión larga (git + gradle + adb + datastore + edición). Tres
+roces recurrentes, uno de ellos ajeno a Witral.
+
+**Añadido**
+- `secreto(nombre, filtro)` — credenciales del Credential Manager de Windows por
+  NOMBRE, sin exponer el valor nunca: sin `nombre` lista las genéricas, con
+  `nombre` dice si existe, con qué usuario, cuántos caracteres mide y cuándo se
+  escribió. Módulo `secretos.py`, `CredReadW`/`CredEnumerateW` por ctypes (cero
+  dependencias nuevas). Fallback a `WITRAL_SECRETO_<NOMBRE>` fuera de Windows.
+- `http_request(..., auth=...)` — autorización por nombre de credencial:
+  `bearer:<cred>`, `token:<cred>` (GitHub clásico), `basic:<cred>` (usa el
+  usuario guardado en la credencial) y `header:<Nombre>:<cred>`. El secreto se
+  enmascara (`····`) en cualquier salida, incluidos los errores.
+  *Motivación:* el `http_request` tipado ya existía y aun así se terminaban
+  escribiendo scripts de PowerShell descartables para leer un token del
+  Credential Manager y probarlo. La tool existía; lo que faltaba era el puente
+  entre "el secreto está guardado" y "la petición lo usa".
+- `run(..., segundos=45)` — tope PROPIO, por debajo del corte del cliente MCP
+  (~60s). Antes el timeout interno era de 120s: el cliente cortaba primero y la
+  llamada moría sin salida ni diagnóstico. Ahora vuelve código 124 con el aviso
+  concreto de pasar a `run_async`.
+
+**Cambiado**
+- `run`/`run_async` pasan a `shell="auto"` por defecto. En lugares Windows se
+  desvía a PowerShell (`-EncodedCommand`) SOLO ante construcciones con las que
+  cmd pelea: alternación `\|` de findstr, `%%` de los `for`, comillas dobles
+  anidadas o escapadas, comillas simples como agrupador. La salida dice por qué
+  se desvió. `"powershell"` sigue forzando; `"cmd"` desactiva el desvío.
+- Red de atrás: si cmd igual falla por SU sintaxis o por comando no reconocido
+  (mensajes en inglés y español) **y** el comando es de solo lectura, `run` lo
+  reintenta una vez en PowerShell y lo dice. Se exige solo-lectura y salida
+  vacía para no repetir nada con efectos.
+- Dos no-desvíos deliberados: con `&&` o `||` nunca se pasa a PowerShell
+  (Windows PowerShell 5.1 no los soporta, y romperlos sería peor que la pelea de
+  comillas), y `%VAR%` no cuenta como pelea (ahí cmd es justamente lo que se
+  quiso; en PowerShell no expandiría).
+
+**Documentado (no es código)**
+- El *"The device is not connected to the bridge"* y los cortes a mitad de
+  operación son del puente Cowork↔Claude Desktop, no de Witral: cuando cae, la
+  llamada ni siquiera llega al servidor, así que no hay reintento que Witral
+  pueda hacer. Lo que sí es de Witral ya está cubierto — el estado de los
+  trabajos vive en `.witral/jobs/<id>/` y sobrevive al corte y a los reinicios,
+  y cada edición deja backup. La receta operativa (llamadas cortas, `run_async`
+  para lo largo, verificar con una tool liviana antes de reintentar algo con
+  efectos) quedó escrita en la sección 5 de WITRAL_PARA_CLAUDE.md.
+- Archivos grandes con Claude corriendo en la nube: en vez de leer por rangos
+  sobre un puente inestable, stagear el archivo al sandbox de Claude de una sola
+  transferencia y trabajarlo ahí. Cada llamada de menos es una oportunidad de
+  menos de que el puente se caiga en el medio.
+
+**Pruebas**
+- `server/pruebas_ronda14.py`: lógica pura de `_motivo_powershell` (hostiles y
+  benignos, incluidos los dos no-desvíos), `_envolver_shell` (ida y vuelta del
+  base64 UTF-16LE, forzados y rechazos), `_huele_a_fallo_de_cmd` (no reintentar
+  con salida ya emitida ni ante errores reales del comando), parsing de `auth`
+  con la lectura de credenciales mockeada, y enmascarado. Más una verificación
+  en vivo de que la estructura ctypes del Credential Manager responde.
+
 ### Ronda 13 — el motor de base es un eje: SQL Server además de PostgreSQL
 
 Hasta acá Witral solo hablaba PostgreSQL: `basedatos.py` estaba cableado a

@@ -46,10 +46,10 @@ def _regex_o_glob(patron: str):
         if any(c in patron for c in "*?["):
             return True, None, (
                 f"[patrón interpretado como glob (no compilaba como regex: {e}); "
-                f"para regex usá, p. ej., '\\.apk$' en vez de '*.apk'.]\n")
+                f"para regex usar, p. ej., '\\.apk$' en vez de '*.apk'.]\n")
         return False, None, (
             f"error: '{patron}' no es una regex válida ({e}). buscar_nombre usa "
-            f"REGEX: para la extensión .apk usá '\\.apk$' (o 'apk$'); un glob "
+            f"REGEX: para la extensión .apk usar '\\.apk$' (o 'apk$'); un glob "
             f"tipo '*.apk' también se acepta y se interpreta como glob.")
 
 

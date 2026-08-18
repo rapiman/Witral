@@ -38,7 +38,7 @@ Lo único que el script **no** puede hacer solo es el reinicio de Claude Desktop
 (paso 7) y agregar tus servidores remotos a `lugares.json` (paso 4): crea uno
 mínimo con solo el lugar `local`.
 
-Si preferís entender cada pieza, o estás en Linux/macOS, seguí las secciones de
+Si preferirs entender cada pieza, o estás en Linux/macOS, seguí las secciones de
 abajo a mano.
 
 ---
@@ -141,7 +141,7 @@ Puntos clave:
   sobre archivos. Todo queda acotado ahí.
 - **`so`**: `windows` o `unix`. Se autodetecta en el lugar local; en remotos
   asume `unix` salvo que lo declares. Un Windows remoto por SSH usa `"so": "windows"`.
-- **Autenticación SSH**: preferí `clave` (ruta a la clave privada) antes que
+- **Autenticación SSH**: preferir `clave` (ruta a la clave privada) antes que
   `password`. Si usas `password`, queda en texto plano en el archivo: protégelo.
 - **`sensible: true`** en un lugar (p. ej. producción) refuerza las confirmaciones.
 

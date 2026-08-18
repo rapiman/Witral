@@ -367,13 +367,13 @@ def _aplicar_literal(texto: str, ed: EdicionLiteral) -> str:
             raise EdicionError(
                 "El bloque 'viejo' no aparece, PERO el contenido 'nuevo' ya está "
                 "presente en el archivo: probablemente esta edición ya se aplicó. "
-                "Verificá con leer_rango antes de reintentar."
+                "Verificar con leer_rango antes de reintentar."
             )
         raise EdicionError("El bloque 'viejo' no aparece en el archivo."
                            + _pista_escape_unicode(ed.viejo, texto))
     if n > 1:
         raise EdicionError(
-            f"El bloque 'viejo' aparece {n} veces (ambiguo). Usá edición por línea."
+            f"El bloque 'viejo' aparece {n} veces (ambiguo). Usar edición por línea."
         )
     return texto.replace(ed.viejo, ed.nuevo, 1)
 

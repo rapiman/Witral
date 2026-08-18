@@ -12,7 +12,7 @@ POR QUÉ EL CRC LO CALCULA LA HERRAMIENTA Y NO EL LLAMADOR
 Porque un CRC calculado del lado del que llama es caro de escribir en cada
 llamada y, sobre todo, es un lugar donde uno se equivoca EN SILENCIO: un CRC
 mal calculado no se ve, solo produce un NAK del otro lado y un rato de
-desconcierto. Acá el llamador manda el texto y nada más.
+desconcierto. Aquí el llamador manda el texto y nada más.
 
 SOBRE EL NOMBRE DEL FRAMING
 Se llama `stx_etx_crc16arc` y no `stx_etx_crc16` porque "CRC-16" a secas es
@@ -35,7 +35,7 @@ NAK = 0x15
 FRAMINGS = ("crudo", "stx_etx_crc16arc")
 
 # Tope duro por llamada: el cliente MCP corta las llamadas largas. Una operación
-# que espera a una persona (tarjeta, PIN) NO se sigue desde acá: se dispara y se
+# que espera a una persona (tarjeta, PIN) NO se sigue desde aquí: se dispara y se
 # asierta por otro lado.
 TOPE_TIMEOUT_S = 40
 

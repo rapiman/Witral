@@ -7,7 +7,7 @@ El motor es un eje más de la config del lugar (`db.motor`), igual que `donde`
 es el eje de máquina: la misma tool sirve para postgres (`psql`), SQL Server
 (`sqlcmd`) y —cuando se agregue— Oracle (`sqlplus`). Lo común (partir el
 bloque en sentencias, decidir qué es destructivo, reintentar ante caída de
-conexión) vive acá una sola vez; lo que cambia por motor son tres cosas
+conexión) vive aquí una sola vez; lo que cambia por motor son tres cosas
 acotadas: cómo se arman los argumentos, cómo viaja la password, y cómo se
 entrega el SQL.
 
@@ -382,3 +382,96 @@ def _correr(lugar: Lugar, db: DBConfig, args: list[str],
 
 
 _q = T.comillas  # comilla POSIX: origen único en transporte.comillas
+
+
+# --- SQLite (archivo, no servidor) -------------------------------------------
+
+def _fmt_tabla(columnas: list[str], filas: list, maximo: int) -> str:
+    """Tabla de ancho fijo, con tope de filas y aviso al truncar."""
+    if not columnas:
+        return "(sin resultados)"
+    datos = [[("" if v is None else str(v)) for v in f] for f in filas[:maximo]]
+    anchos = [len(c) for c in columnas]
+    for fila in datos:
+        for i, v in enumerate(fila):
+            anchos[i] = max(anchos[i], min(len(v), 60))
+    def linea(vals):
+        return " | ".join(v[:60].ljust(anchos[i]) for i, v in enumerate(vals))
+    salida = [linea(columnas), "-+-".join("-" * a for a in anchos)]
+    salida += [linea(f) for f in datos]
+    if len(filas) > maximo:
+        salida.append(f"... y {len(filas) - maximo} filas más "
+                      f"(subir 'maximo' o acotar con LIMIT)")
+    salida.append(f"({len(filas)} fila(s))")
+    return "\n".join(salida)
+
+
+def sqlite_consulta(lugar: Lugar, archivo: str, comando: str,
+                    confirmado: bool = False, maximo: int = 50) -> str:
+    """
+    Consulta un archivo SQLite. Witral ya corre en Python, así que usa el
+    módulo `sqlite3` de la stdlib: sin dependencias ni cliente externo.
+
+    En un servidor tan orientado a Android, sqlite es el motor que aparece —la
+    base de una app, un .db traído con adb_pull— y hasta ahora obligaba a
+    escribir `python -c "import sqlite3..."` a mano.
+
+    Las LECTURAS abren la base en modo solo-lectura (URI `mode=ro`), así una
+    consulta no puede tocar el archivo ni siquiera por error. Cualquier
+    sentencia que modifique datos o esquema requiere confirmado=True.
+    Sin 'comando', lista las tablas y sus columnas.
+    """
+    import sqlite3
+    from .seguridad import normalizar
+
+    if not lugar.es_local:
+        return ("sqlite por ahora solo está implementado en lugares locales. "
+                "Para una base remota: copiar el archivo con `copiar` y "
+                "consultarlo aquí.")
+    try:
+        ruta = normalizar(lugar.raiz, archivo)
+    except Exception as e:
+        return f"error: {e}"
+    if not ruta.exists():
+        return (f"No existe el archivo {archivo} en {lugar.nombre}. "
+                f"Si la base está en un dispositivo, traerla antes con "
+                f"adb_pull(serial, remoto, destino, paquete=...).")
+
+    comando = (comando or "").strip()
+    if not comando:
+        comando = ("SELECT name FROM sqlite_master WHERE type='table' "
+                   "ORDER BY name")
+    escribe = es_destructivo(comando)
+    if escribe and not confirmado:
+        return (f"CONFIRMACIÓN REQUERIDA: el SQL modifica la base "
+                f"{archivo}.\n{comando}\n"
+                f"Reintentar con confirmado=True. (Las lecturas no piden "
+                f"confirmación y además abren la base en modo solo-lectura.)")
+
+    try:
+        if escribe:
+            con = sqlite3.connect(str(ruta))
+        else:
+            uri = "file:" + str(ruta).replace("?", "%3f").replace("#", "%23")
+            con = sqlite3.connect(uri + "?mode=ro", uri=True)
+    except sqlite3.Error as e:
+        return f"error abriendo {archivo}: {e}"
+    try:
+        cur = con.cursor()
+        bloques = []
+        for sentencia in partir_sentencias(comando):
+            try:
+                cur.execute(sentencia)
+            except sqlite3.Error as e:
+                bloques.append(f"error en «{sentencia[:60]}»: {e}")
+                continue
+            if cur.description:
+                columnas = [d[0] for d in cur.description]
+                bloques.append(_fmt_tabla(columnas, cur.fetchall(), maximo))
+            else:
+                bloques.append(f"OK ({cur.rowcount} fila(s) afectadas)")
+        if escribe:
+            con.commit()
+        return "\n\n".join(bloques) if bloques else "(sin resultados)"
+    finally:
+        con.close()

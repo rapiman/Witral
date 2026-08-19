@@ -524,6 +524,31 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
   llamadas cortas y confiables. SIEMPRE verificar con `git_status` antes de reintentar:
   la operacion pudo completarse aunque la respuesta se perdiera.
 
+**Crear un repo en GitHub (no solo empujar a uno que ya existe).**
+- NO SE PUEDE con las tools de git: `git_push` empuja a un repo existente, crearlo es API.
+  Tampoco con SSH: `git@github.com` autentica pero no expone creacion de repos.
+- ALTERNATIVA (desde ronda 14): `http_request` con `auth` por nombre de credencial, sin que
+  el token pase por la conversacion.
+
+      http_request(
+        url="https://api.github.com/orgs/<ORG>/repos",
+        metodo="POST",
+        auth="bearer:<cred>",
+        headers_json='{"Accept":"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28"}',
+        cuerpo='{"name":"<repo>","private":true,"auto_init":false}')
+
+  El usuario guarda el token una vez: `cmdkey /generic:<cred> /user:<usuario> /pass`.
+  Token fine-grained sobre la ORG con Administration + Contents + Metadata (`Administration:
+  write` es lo que habilita crear repos). Si la org bloquea los fine-grained, token clasico
+  con scope `repo` y `auth="token:<cred>"`.
+- **Reparto:** el `push` va por SSH con la llave del usuario y NO necesita el token; el token
+  es solo para crear y administrar por API. Si el push falla por permisos, el problema es la
+  llave o la membresia en la org, no el token.
+- NO escribir un `.ps1` descartable que lea el token de un archivo: es justo el patron que
+  ronda 14 vino a reemplazar (y despues hay que acordarse de borrar el archivo y el script).
+- Convencion acordada con el usuario (2026-08-19): cualquier accion DESTRUCTIVA por API
+  —borrar un repo, cambiar visibilidad, tocar permisos— se pregunta antes.
+
 **Compilar Android en local Windows.**
 - SE PUEDE (desde ronda 10): `gradle_build(proyecto, tarea)` lanza el build como
   trabajo asincrono con el fix del sandbox puesto (JAVA_TOOL_OPTIONS redirige el

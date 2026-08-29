@@ -818,13 +818,17 @@ def _fmt_resultado(r: T.Resultado) -> str:
 # un protobuf: mensaje raiz con un map (field 1, repetido) de
 # entry{ key(1,string), value(2,Value) }, donde Value es un oneof por tipo:
 #   field 1 -> bool, 2 -> float, 3 -> int (int32/varint), 4 -> long (int64),
-#   field 5 -> string, 6 -> double, 7 -> string_set.
+#   field 5 -> string, 6 -> string_set, 7 -> double.
 # Esto permite leer/escribir una pref sin tener la app, util para alternar
 # parametros en QA. Requiere run-as (app debuggable); en release no hay acceso.
 
 # Mapa field-de-Value -> nombre de tipo legible.
+# OJO con el orden de los ultimos dos: en PreferencesProto.Value el field 6 es
+# string_set y el 7 es double (no al reves). Estuvieron invertidos hasta la
+# ronda 16: un double escrito por datastore_set salia como field 6, que la app
+# lee como StringSet y revienta al cargar la pref.
 _DS_TIPO_POR_FIELD = {1: "bool", 2: "float", 3: "int", 4: "long",
-                      5: "string", 6: "double", 7: "string_set"}
+                      5: "string", 6: "string_set", 7: "double"}
 _DS_FIELD_POR_TIPO = {v: k for k, v in _DS_TIPO_POR_FIELD.items()}
 
 
@@ -894,7 +898,15 @@ def _ds_decode_value(valmsg: bytes):
         if tipo == "bool":
             return tipo, bool(vv)
         if tipo in ("int", "long"):
-            return tipo, int(vv)
+            # protobuf codifica los enteros NEGATIVOS (int32 e int64) como
+            # complemento a dos de 64 bits, asi que el varint crudo vuelve como
+            # un numero gigante: -7 se lee 18446744073709551609. Sin este
+            # reajuste, datastore_get muestra basura para cualquier pref
+            # negativa y datastore_set con tipo="auto" la reescribe mal.
+            n = int(vv)
+            if n >= (1 << 63):
+                n -= (1 << 64)
+            return tipo, n
         if tipo == "string":
             return tipo, vv.decode("utf-8", "replace")
         if tipo == "float":
@@ -909,25 +921,84 @@ def _ds_decode_value(valmsg: bytes):
     return "desconocido", None
 
 
-def _ds_encode_value(tipo: str, valor: str) -> bytes:
-    """Codifica un Value protobuf desde un valor en texto y su tipo."""
+def _ds_encode_value(tipo: str, valor) -> bytes:
+    """
+    Codifica un Value protobuf desde un valor y su tipo. 'valor' puede venir en
+    texto (datastore_set, que recibe todo como string) o ya tipado desde JSON
+    (datastore_poblar): int/float/bool/str/list.
+    """
     import struct
     field = _DS_FIELD_POR_TIPO.get(tipo)
     if field is None:
         raise ValueError(f"tipo '{tipo}' no soportado")
     if tipo == "bool":
-        v = 1 if str(valor).strip().lower() in ("1", "true", "si", "sí", "yes") else 0
+        if isinstance(valor, bool):
+            v = 1 if valor else 0
+        else:
+            v = 1 if str(valor).strip().lower() in ("1", "true", "si", "sí", "yes") else 0
         return bytes([(field << 3) | 0]) + _ds_encode_varint(v)
     if tipo in ("int", "long"):
         return bytes([(field << 3) | 0]) + _ds_encode_varint(int(valor))
     if tipo == "string":
-        s = valor.encode("utf-8")
+        s = str(valor).encode("utf-8")
         return bytes([(field << 3) | 2]) + _ds_encode_varint(len(s)) + s
     if tipo == "float":
         return bytes([(field << 3) | 5]) + struct.pack("<f", float(valor))
     if tipo == "double":
         return bytes([(field << 3) | 1]) + struct.pack("<d", float(valor))
+    if tipo == "string_set":
+        items = valor if isinstance(valor, (list, tuple, set)) else [valor]
+        cuerpo = b""
+        for s in items:
+            sb = str(s).encode("utf-8")
+            cuerpo += bytes([0x0A]) + _ds_encode_varint(len(sb)) + sb
+        return bytes([(field << 3) | 2]) + _ds_encode_varint(len(cuerpo)) + cuerpo
     raise ValueError(f"tipo '{tipo}' no soportado para escritura")
+
+
+# Rango de int32: decide int vs long al inferir el tipo de un entero JSON. En
+# Kotlin son claves DISTINTAS (intPreferencesKey vs longPreferencesKey), asi que
+# escribir un long donde la app espera int deja la pref invisible para la app.
+_DS_INT32_MIN, _DS_INT32_MAX = -(2 ** 31), 2 ** 31 - 1
+
+
+def _ds_tipo_inferido(valor) -> str:
+    """Tipo DataStore a partir del tipo Python/JSON del valor."""
+    if isinstance(valor, bool):
+        return "bool"
+    if isinstance(valor, int):
+        return "int" if _DS_INT32_MIN <= valor <= _DS_INT32_MAX else "long"
+    if isinstance(valor, float):
+        return "double"
+    if isinstance(valor, (list, tuple, set)):
+        return "string_set"
+    return "string"
+
+
+def _ds_entradas(data: bytes):
+    """[(clave, valmsg|None, raw_entry)] del mapa raiz, en orden de archivo."""
+    salida = []
+    for field, wt, chunk, raw in _ds_parse(data, 0, len(data)):
+        if field != 1 or wt != 2:
+            continue
+        clave = None
+        valmsg = None
+        for sf, swt, sval, _ in _ds_parse(chunk, 0, len(chunk)):
+            if sf == 1:
+                clave = sval.decode("utf-8", "replace")
+            elif sf == 2:
+                valmsg = sval
+        if clave is not None:
+            salida.append((clave, valmsg, raw))
+    return salida
+
+
+def _ds_entrada(clave: str, valmsg: bytes) -> bytes:
+    """Una entrada del map: entry{ key(1,string), value(2,Value) } con su tag."""
+    kb = clave.encode("utf-8")
+    obj = (bytes([0x0A]) + _ds_encode_varint(len(kb)) + kb +
+           bytes([0x12]) + _ds_encode_varint(len(valmsg)) + valmsg)
+    return bytes([0x0A]) + _ds_encode_varint(len(obj)) + obj
 
 
 def _ds_ruta(paquete: str, archivo: str) -> str:
@@ -1102,3 +1173,178 @@ def datastore_set(lugar: Lugar, serial: str, paquete: str, archivo: str,
     return (f"OK: '{clave}' [{tipo_final}] = {valor_v!r} en {ruta}.\n"
             f"Backup: {bak}. App detenida (force-stop): relanzala con "
             f"adb_relanzar para que cargue el cambio.")
+
+
+def datastore_poblar(lugar: Lugar, serial: str, paquete: str, archivo: str,
+                     claves, modo: str = "fusionar") -> str:
+    """
+    Escribe MUCHAS claves de un DataStore en UNA pasada: un solo force-stop, un
+    solo backup, un solo archivo escrito. Es la version en bloque de
+    datastore_set, que hace todo eso por cada clave.
+
+    Nacio de un caso real (2026-08-20): dejar un POS operativo sin descargar
+    parametros desde el TMS. La app convierte los .json de parametros en cinco
+    DataStore (~60 claves) dentro de su flujo de carga; replicar eso con
+    datastore_set eran ~60 llamadas, cada una con su force-stop y su backup.
+
+    'claves': dict (o JSON) {clave: valor}. El valor puede ser:
+      - un escalar JSON -> el tipo se resuelve asi: si la clave YA existe en el
+        archivo se respeta su tipo actual; si no, se infiere del tipo JSON
+        (bool -> bool, entero -> int o long segun quepa en int32, decimal ->
+        double, lista -> string_set, resto -> string).
+      - {"tipo": "long", "valor": 0} -> tipo explicito. OBLIGATORIO cuando el
+        tipo JSON no alcanza: en Kotlin intPreferencesKey("x") y
+        longPreferencesKey("x") son claves DISTINTAS, asi que un long escrito
+        donde la app espera int queda invisible para la app.
+      - null -> BORRA la clave.
+
+    'modo': "fusionar" (por defecto) conserva las claves que no se mencionan —
+    es lo que hay que usar cuando el propio terminal ya escribio algo ahi (un
+    TID de registro, contadores). "reemplazar" deja el archivo con exactamente
+    las claves entregadas.
+
+    Si el archivo no existe, lo crea (junto con files/datastore/ si falta).
+    """
+    import base64
+    import json as _json
+
+    if isinstance(claves, str):
+        try:
+            claves = _json.loads(claves)
+        except Exception as e:
+            return f"error: 'claves' no es JSON válido: {e}"
+    if not isinstance(claves, dict) or not claves:
+        return ("error: 'claves' debe ser un objeto no vacío "
+                "{clave: valor} o {clave: {\"tipo\": ..., \"valor\": ...}}.")
+    if modo not in ("fusionar", "reemplazar"):
+        return "error: 'modo' debe ser 'fusionar' o 'reemplazar'."
+
+    ruta = _ds_ruta(paquete, archivo)
+
+    def _adb_sh(remoto: str) -> "T.Resultado":
+        return T.ejecutar(lugar, ["adb", "-s", serial, "shell", remoto])
+
+    # ¿Existe el archivo? Se pregunta aparte de leerlo para poder distinguir
+    # "no existe todavía" (caso normal: datastore que la app aún no creó) de
+    # "no tengo run-as" (app release), que con una sola lectura fallida se
+    # confunden y mandan a diagnosticar lo que no es.
+    chk = _adb_sh(f"run-as {paquete} sh -c 'if [ -f {ruta} ]; then echo _SI_; "
+                  f"else echo _NO_; fi'")
+    txt = (chk.salida or "").strip()
+    if "_SI_" not in txt and "_NO_" not in txt:
+        return (f"error: no pude usar run-as sobre '{paquete}' en {serial} "
+                f"(¿app debuggable? ¿paquete correcto?). "
+                f"salida: {txt} {(chk.error or '').strip()}")
+    existia = "_SI_" in txt
+
+    if existia:
+        try:
+            data = _ds_leer_bytes(lugar, serial, paquete, archivo)
+        except ValueError as e:
+            return f"error: {e}"
+    else:
+        data = b""
+
+    entradas = _ds_entradas(data)
+    tipos_actuales = {k: (_ds_decode_value(vm)[0] if vm is not None else None)
+                      for k, vm, _ in entradas}
+
+    nuevas = {}
+    borrar = set()
+    detalle = []
+    for clave, spec in claves.items():
+        if spec is None:
+            borrar.add(clave)
+            detalle.append(f"  - {clave}  (borrada)")
+            continue
+        if isinstance(spec, dict) and "valor" in spec:
+            tipo = (spec.get("tipo") or "").strip()
+            valor = spec["valor"]
+        else:
+            tipo = ""
+            valor = spec
+        if not tipo:
+            actual = tipos_actuales.get(clave)
+            tipo = (actual if actual and actual != "desconocido"
+                    else _ds_tipo_inferido(valor))
+        if tipo not in _DS_FIELD_POR_TIPO:
+            return (f"error: clave '{clave}': tipo '{tipo}' no soportado. "
+                    f"Válidos: {', '.join(_DS_FIELD_POR_TIPO)}.")
+        try:
+            nuevas[clave] = (tipo, _ds_encode_value(tipo, valor))
+        except (ValueError, TypeError) as e:
+            return (f"error: clave '{clave}': no pude codificar {valor!r} "
+                    f"como {tipo}: {e}")
+        marca = "~" if clave in tipos_actuales else "+"
+        detalle.append(f"  {marca} {clave} [{tipo}] = {valor!r}")
+
+    # Reconstruir el archivo. En "fusionar" se copian CRUDAS las entradas que no
+    # se tocan (no se re-serializan: lo que no se pidió cambiar sale byte a byte
+    # igual que entró).
+    salida = bytearray()
+    usadas = set()
+    if modo == "fusionar":
+        for clave, _vm, raw in entradas:
+            if clave in borrar:
+                continue
+            if clave in nuevas:
+                salida += _ds_entrada(clave, nuevas[clave][1])
+                usadas.add(clave)
+            else:
+                salida += raw
+    for clave, (_tipo, vm) in nuevas.items():
+        if clave not in usadas:
+            salida += _ds_entrada(clave, vm)
+
+    nuevo_b64 = base64.b64encode(bytes(salida)).decode()
+    base = archivo.replace("/", "_").replace(".preferences_pb", "")
+    tmp_b64 = f"/sdcard/{base}.{serial}.b64"
+    tmp_pb = f"/sdcard/{base}.{serial}.new.pb"
+    bak = f"/sdcard/{base}.{serial}.bak.pb"
+
+    # 1) Backup del original (si había).
+    if existia:
+        _adb_sh(f"run-as {paquete} sh -c 'cat {ruta} > {bak}'")
+    # 2) Detener la app: DataStore cachea en memoria y sobrescribiría el cambio.
+    T.ejecutar(lugar, ["adb", "-s", serial, "shell", "am", "force-stop", paquete])
+    # 3) Subir el base64 POR TROZOS. Un datastore poblado pasa los pocos cientos
+    #    de bytes de datastore_set; un `echo <b64>` de varios KB en una sola
+    #    línea choca con el límite de argumentos del shell del device.
+    _adb_sh(f"sh -c 'rm -f {tmp_b64} {tmp_pb}'")
+    for i in range(0, len(nuevo_b64), 1200):
+        w = _adb_sh(f"sh -c 'echo -n {nuevo_b64[i:i + 1200]} >> {tmp_b64}'")
+        if not w.ok:
+            return (f"error: no pude subir el base64 al device "
+                    f"(trozo en {i}): {(w.error or '').strip()}")
+    d = _adb_sh(f"sh -c 'cat {tmp_b64} | base64 -d > {tmp_pb}'")
+    if not d.ok:
+        return f"error: no pude decodificar el base64 en el device: {(d.error or '').strip()}"
+    # 4) Copiar al sandbox de la app con los permisos que usa DataStore.
+    cp = _adb_sh(f"run-as {paquete} sh -c 'mkdir -p files/datastore && "
+                 f"cat {tmp_pb} > {ruta} && chmod 600 {ruta}'")
+    if not cp.ok:
+        return f"error: no pude copiar al datastore via run-as: {(cp.error or '').strip()}"
+    _adb_sh(f"sh -c 'rm -f {tmp_b64} {tmp_pb}'")
+
+    # 5) Verificar releyendo: se comparan los valores pedidos contra los que
+    #    quedaron en el archivo, para no reportar OK sobre una escritura parcial.
+    try:
+        verif = _ds_leer_bytes(lugar, serial, paquete, archivo)
+    except ValueError as e:
+        return f"escrito, pero no pude verificar: {e}"
+    quedaron = {k: (_ds_decode_value(vm) if vm is not None else (None, None))
+                for k, vm, _ in _ds_entradas(verif)}
+    faltantes = [k for k in nuevas if k not in quedaron]
+    sobrantes = [k for k in borrar if k in quedaron]
+
+    cab = (f"{'OK' if not faltantes and not sobrantes else 'PARCIAL'}: "
+           f"{ruta} — {len(quedaron)} claves, {len(verif)} bytes "
+           f"(modo {modo}, archivo {'existente' if existia else 'creado'}).")
+    cuerpo = "\n".join(detalle)
+    pie = (f"Backup: {bak}. " if existia else "Sin backup (el archivo no existía). ")
+    pie += "App detenida (force-stop): relanzala con adb_relanzar para que cargue."
+    if faltantes:
+        cuerpo += f"\n  !! no quedaron escritas: {', '.join(faltantes)}"
+    if sobrantes:
+        cuerpo += f"\n  !! no se borraron: {', '.join(sobrantes)}"
+    return f"{cab}\n{cuerpo}\n{pie}"

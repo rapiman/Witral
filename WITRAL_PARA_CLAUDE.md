@@ -48,11 +48,18 @@ local o remoto. Un Windows remoto por SSH usaria `taskkill`; un Linux local usar
   lo vuelca entero). Con `desde`/`hasta`: solo ese rango de lineas, numerado (forma
   correcta de mirar archivos grandes, y de ubicar numeros antes de editar por linea).
   Con `cola=N`: las ultimas N lineas (logs, resultados; en remoto usa tail).
-- `escribir(archivo, contenido, donde)` — crea o SOBRESCRIBE el archivo entero. Para nuevos o
-  chicos, SOLO TEXTO.
+- `escribir(archivo, contenido, donde, eol)` — crea o SOBRESCRIBE el archivo entero. Para
+  nuevos o chicos, SOLO TEXTO. Desde la ronda 16: **la carpeta destino se crea sola** en local
+  Y en remoto (antes en remoto fallaba con `[Errno 2] No such file`, mensaje que ni siquiera
+  decia que faltaba la CARPETA), y **conserva el fin de linea del archivo que sobrescribe**,
+  asi un repo con archivos mezclados (uno CRLF, otro LF) no obliga a detectar y restaurar el
+  EOL a mano en cada parche. Un archivo NUEVO se escribe tal cual; `eol="lf"`/`"crlf"` fuerza
+  uno y `"tal_cual"` desactiva la normalizacion.
 - `subir_b64(archivo, contenido_b64, donde, anexar_trozo)` — escribe BYTES decodificados
   de base64: el puente para traer binarios o contenido grande desde afuera (p. ej. el
   sandbox de analisis de Claude). Con `anexar_trozo=True` se sube por trozos.
+  **ALCANCE REAL: cientos de KB.** Varios MB son decenas de llamadas y NO es el camino: ver
+  "Traer un archivo GRANDE desde el sandbox de Claude" en la seccion 5.
 - `anexar(archivo, contenido, donde)` — agrega texto al final sin reescribir todo.
 - `convertir_eol(archivo, a, donde)` — convierte el fin de linea del archivo entero a `lf` o
   `crlf`. Para pasar archivos clonados en Windows (CRLF) a LF, o limpiar saltos mezclados.
@@ -67,8 +74,11 @@ local o remoto. Un Windows remoto por SSH usaria `taskkill`; un Linux local usar
 
 ### Edicion: dos modos
 - `editar_literal(archivo, viejo, nuevo, donde)` — reemplaza una ocurrencia EXACTA y unica.
-  Falla si no aparece o aparece mas de una vez. Inmune a CRLF (normaliza antes de comparar).
-  Para texto corto que Claude ya tiene a la vista. Ubica por CONTENIDO (que texto).
+  Falla si no aparece o aparece mas de una vez. Inmune a CRLF (normaliza antes de comparar) y
+  PRESERVA el EOL del archivo. Para texto corto que Claude ya tiene a la vista. Ubica por
+  CONTENIDO (que texto). Desde la ronda 16, cuando el literal es AMBIGUO el error dice cuantas
+  veces aparece **y en que lineas esta cada una**, con la linea completa: alcanza para ampliar
+  el contexto (o saltar a `editar_linea`) en un intento y no en tres a ciegas.
 - `editar_linea(archivo, desde, hasta, nuevo, ancla, linea, donde)` — reemplaza ese rango de
   lineas. Inmune a CRLF/whitespace. Ubica por POSICION (que lineas). Para UNA sola linea:
   pasar `linea=N` (alias comodo de desde=hasta=N) u omitir `hasta`. El parametro `ancla` (muy
@@ -161,6 +171,13 @@ llamada. Si se quiere a mano: `git_status` -> `git_add` -> `git_diff` -> `git_co
   codigo + ultimas lineas de out/err (sin id: lista los trabajos del lugar; lectura
   libre). `run_matar(id, donde, confirmado)` — mata el arbol completo del trabajo.
   Estado en disco en `.witral/jobs/<id>/` del lugar; sobrevive a reinicios.
+- **`run_esperar(id, ..., hasta_patron)` (ronda 16): esperar la LINEA, no la muerte del
+  proceso.** `hasta_patron` es una regex; la espera vuelve en cuanto una linea de out.log o
+  err.log matchea, y devuelve esa linea. Es lo que convierte una bateria larga en dos llamadas
+  en vez de diez: si ya se sabe que linea se espera, no hay razon para esperar a que el proceso
+  muera. Si el trabajo TERMINA sin que el patron aparezca, vuelve igual y lo dice — no se queda
+  esperando algo que ya no va a salir. Ejemplo:
+  `run_esperar(id, hasta_patron="SONDA IDENTICA|SONDA DIFIERE")`.
 - `run_esperar(id, hasta_segundos, lineas, donde)` — BLOQUEA del lado de Witral hasta que
   el trabajo termine y devuelve su estado final: reemplaza el polling manual con `sleep` +
   `run_status`. Vuelve al instante cuando el trabajo termina; como el cliente MCP corta las
@@ -203,6 +220,13 @@ decide que cliente nativo se invoca. Soportados: **postgres** (`psql`) y **sqlse
 - `sql(donde, comando, base)` — consulta/sentencia sobre la base del lugar, con el
   cliente que corresponda al motor. Con varias sentencias en una llamada se muestran
   TODOS los result sets. `base` apunta a otra base del mismo lugar (override del -d).
+  **Topes y veredicto (ronda 16)**: la sentencia se corta a los 40s del lado del SERVIDOR
+  (`statement_timeout` en postgres, `-t` en sqlcmd) y la llamada a los 45s del lado de Witral,
+  las dos por debajo del corte del cliente MCP. Que el que corte sea el servidor es lo que
+  permite AFIRMAR que la sentencia se deshizo. Cuando algo falla, la respuesta agrega un
+  VEREDICTO explicito: no se envio / se envio y el servidor la cancelo (deshecha) / se envio y
+  el resultado es INDETERMINADO (verificar con un SELECT antes de reintentar). Antes, un
+  "Device did not respond within 60s" dejaba sin saber si un UPDATE habia commiteado.
   En lugar NO sensible con bloque MIXTO (SELECT + UPDATE), sin `confirmado` corre las
   LECTURAS de inmediato y pide confirmacion solo por las ESCRITURAS (se acabo el doble viaje
   por un SELECT escondido). Ante caida de conexion (WinError 10054, communication link
@@ -342,6 +366,26 @@ app **debuggable** (en release no hay acceso).
   Pensado para alternar parametros en QA sin UI (ej. `operativa` REST/RETAIL). Hace backup en
   `/sdcard` y `force-stop` antes de escribir (DataStore cachea en memoria); requiere
   `confirmado=True` y **relanzar la app** (`adb_relanzar`) despues para que cargue el cambio.
+- `datastore_poblar(serial, paquete, archivo, claves, modo, donde, confirmado)` (ronda 16) —
+  MUCHAS claves en UNA pasada: un solo force-stop, un solo backup, un solo archivo escrito.
+  Es `datastore_set` en bloque. Poblar un datastore entero con `datastore_set` son N llamadas
+  con N force-stops; con esto es una. Si el archivo (o `files/datastore/`) no existe, lo crea:
+  sirve para datastores que la app todavia no escribio.
+  `claves` es JSON `{clave: valor}`. Con un escalar, el tipo se resuelve asi: si la clave YA
+  existe se respeta su tipo actual, si no se infiere del tipo JSON (entero -> `int` o `long`
+  segun quepa en int32). Con `{"tipo": "long", "valor": 0}` se fuerza — **hacerlo siempre que
+  la app use `longPreferencesKey`**: en Kotlin `intPreferencesKey("x")` y
+  `longPreferencesKey("x")` son claves DISTINTAS, asi que el tipo equivocado deja la pref
+  invisible para la app y el sintoma es un valor por defecto sin explicacion, no un error.
+  `null` como valor BORRA la clave.
+  `modo="fusionar"` (por defecto) conserva lo que no se menciona — **obligatorio cuando el
+  propio equipo ya escribio ahi** (un TID de registro, contadores de operacion);
+  `modo="reemplazar"` deja el archivo con exactamente las claves entregadas. Verifica
+  releyendo y avisa si alguna no quedo escrita.
+  Caso que lo origino (2026-08-20): dejar un POS operativo sin descargar parametros desde el
+  TMS. La app convierte los `.json` de parametros en cinco DataStore (~60 claves) dentro de su
+  flujo de carga; ese flujo no corre en el arranque, asi que copiar los `.json` al equipo no
+  alcanza — hay que escribir los DataStore.
 
 ### Build
 - `gradle_build(proyecto, tarea, donde)` — compila con el `gradlew` del proyecto. En unix/remoto
@@ -385,6 +429,7 @@ app **debuggable** (en release no hay acceso).
 | Ver el arbol de vistas crudo                | `adb_ui`                              |
 | Ver parametros (DataStore) del POS           | `datastore_get`                       |
 | Cambiar un parametro del POS en QA           | `datastore_set` (confirmado=True)     |
+| Poblar un datastore entero (muchas claves)   | `datastore_poblar` (confirmado=True)  |
 | Ver si un trabajo termino (sin bloquear)     | `run_status(id)`                      |
 | Esperar un trabajo cuando no queda mas nada  | `run_esperar(id)`                     |
 | Desplegar (copiar+restart+humo) en una pasada| `desplegar` (confirmado=True)         |
@@ -394,6 +439,8 @@ app **debuggable** (en release no hay acceso).
 | Consultar una base (cualquier motor)         | `sql(donde, comando)`                 |
 | Comando arbitrario (ultimo recurso)          | `run` (siempre confirmado)            |
 | Ver por que fallo un build                   | `gradle_errores(job_id)`              |
+| Esperar una LINEA concreta de un trabajo     | `run_esperar(id, hasta_patron="...")` |
+| Llevar un archivo de MB al lugar remoto      | puente -> maquina -> `copiar` (seccion 5) |
 | Saber que build esta instalada en el POS     | `adb_estado_app(serial, paquete)`     |
 | Instalar sobre una version mas nueva         | `adb_install(..., permitir_downgrade=True)` |
 | Traer la base de una app del dispositivo     | `adb_pull(..., paquete=...)` -> `sqlite` |
@@ -479,6 +526,18 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
   `run_esperar(id)` para cuando no queda otra tarea util y solo falta que termine.
 - ATENCION en Windows: `timeout /t` NO sirve dentro de un job (no soporta stdin redirigido);
   para esperas usar `powershell -NoProfile -Command "Start-Sleep N"`.
+
+**Traer un archivo GRANDE desde el sandbox de Claude a un lugar (MB, no KB).**
+- NO SIRVE: `subir_b64` por trozos. Un archivo de 3 MB son ~4 MB de base64 y decenas de
+  llamadas; en la practica termina en "mejor mando un extracto", y el archivo completo no
+  llega nunca por una limitacion de transporte y no por una decision.
+- CAMINO CORRECTO, en dos tramos, ninguno de los cuales tiene ese tope:
+  1. **Sandbox -> maquina del usuario**: el puente de dispositivos escribe el archivo en una
+     carpeta conectada (`device_commit_files` con el uuid que devuelve el envio del archivo).
+     Requiere que la carpeta este conectada (`device_request_folder_access`, una vez).
+  2. **Maquina del usuario -> lugar remoto**: `copiar(origen="local:ruta",
+     destino="wedwed:/ruta")`, que va por SFTP y mueve MB sin problema.
+- Si el destino final era la maquina local, el tramo 1 ya es todo el camino.
 
 **Traer datos DESDE el sandbox de analisis de Claude a un lugar.**
 - NO SE PUEDE: puente directo. El sandbox corre del lado de Claude y Witral en la maquina
@@ -635,7 +694,36 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
 
 ## 7. ESTADO Y PENDIENTES (para retomar desde otra conversacion)
 
-### Ultima sesion (2026-08-18, ronda 15: bugs y fricciones de dos jornadas Android/POS)
+### Ultima sesion (2026-08-28, ronda 16: feedback de un dia entero de uso)
+
+Seis puntos, ordenados por lo que costo tiempo. Validado con
+`server/pruebas_ronda16.py` (27 aserciones) mas las rondas 14 y 15 en verde.
+
+1. **`run_esperar(id, hasta_patron=...)`** — el que mas rendia. Nueve llamadas seguidas para
+   una bateria, ocho devolviendo "sigue CORRIENDO", cuando quien llama YA SABE que linea
+   espera. Ahora la espera puede terminar por PATRON (regex sobre out.log + err.log) y no solo
+   por muerte del proceso: vuelve con la linea que matcheo. Como el tail de los logs ya se
+   hacia para mostrar el estado, el costo del grep es despreciable. Si el trabajo termina sin
+   que el patron aparezca, vuelve igual y lo dice.
+2. **`escribir` crea la carpeta destino** tambien en REMOTO. En local ya lo hacia: la
+   asimetria entre los dos lados era el bug, y el `[Errno 2] No such file` de sftp ni siquiera
+   decia que faltaba la carpeta.
+3. **`sql`/`psql`: topes propios y VEREDICTO.** La sentencia se corta a los 40s del lado del
+   servidor y la llamada a los 45s del lado de Witral. Que corte el servidor es lo que permite
+   afirmar que la sentencia quedo deshecha. Ante un fallo, la respuesta dice cual de los tres
+   casos fue: no se envio / se envio y se cancelo / se envio e INDETERMINADO.
+4. **Archivos de MB desde el sandbox**: no es codigo, es receta (seccion 5). `subir_b64` no da
+   para eso y ahora lo dice; el camino es puente de dispositivos -> maquina -> `copiar` (SFTP).
+5. **`editar_literal` ambiguo dice DONDE**: cuantas veces aparece y en que lineas, con la
+   linea completa. Se ajusta el contexto en un intento y no en tres.
+6. **EOL**: `escribir` conserva el fin de linea del archivo que sobrescribe (las tools de
+   edicion ya lo hacian). Se acabo detectar y restaurar CRLF/LF a mano en cada parche.
+
+Lo que el feedback confirma que NO hay que tocar: el eje `donde`, los mensajes de error que
+explican el porque y no solo el que, y que los jobs de `run_async` sobrevivan a reinicios y al
+puente (con `.witral/jobs/<id>/` se recuperaron salidas despues de una caida).
+
+### Sesion anterior (2026-08-18, ronda 15: bugs y fricciones de dos jornadas Android/POS)
 
 Tres bugs, cuatro fricciones y una pasada de idioma. Validado con
 `server/pruebas_ronda15.py` (45 aserciones, todas OK) y con `import witral.server` limpio.

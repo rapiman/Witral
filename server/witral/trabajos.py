@@ -295,8 +295,35 @@ def _estado_rapido(lugar: Lugar, jid: str) -> str:
                           "terminado_sin_codigo") else "corriendo"
 
 
+def _texto_logs(lugar: Lugar, jid: str) -> str:
+    """Contenido actual de out.log + err.log del trabajo (para buscar en él)."""
+    if lugar.es_local:
+        base = _dir_jobs_local(lugar) / jid
+        partes = []
+        for nombre in ("out.log", "err.log"):
+            ruta = base / nombre
+            if ruta.exists():
+                try:
+                    partes.append(ruta.read_text(encoding="utf-8",
+                                                 errors="replace"))
+                except OSError:
+                    pass
+        return "\n".join(partes)
+    b = f"{_DIR_REMOTO}/{jid}"
+    r = T.ejecutar(lugar, f"cat {b}/out.log {b}/err.log 2>/dev/null", timeout=20)
+    return r.salida or ""
+
+
+def _buscar_patron(lugar: Lugar, jid: str, patron) -> str:
+    """Primera línea del log que matchea 'patron', o "" si todavía ninguna."""
+    for linea in _texto_logs(lugar, jid).splitlines():
+        if patron.search(linea):
+            return linea.strip()
+    return ""
+
+
 def esperar(lugar: Lugar, jid: str, hasta_segundos: int = 600,
-            lineas: int = 40) -> str:
+            lineas: int = 40, hasta_patron: str = "") -> str:
     """
     Bloquea del lado de Witral hasta que el trabajo termine, y devuelve su
     estado final. Evita el polling manual con sleep+run_status.
@@ -309,8 +336,25 @@ def esperar(lugar: Lugar, jid: str, hasta_segundos: int = 600,
     """
     presupuesto = min(max(1, int(hasta_segundos)), _TOPE_ESPERA)
     intervalo = 1.0 if lugar.es_local else 3.0
+    rx = None
+    if hasta_patron:
+        import re as _re
+        try:
+            rx = _re.compile(hasta_patron)
+        except _re.error as e:
+            return (f"error: 'hasta_patron' no es una regex válida ({e}). "
+                    f"Para alternativas, la barra vertical: "
+                    f"\"SONDA IDENTICA|SONDA DIFIERE\".")
     t0 = time.time()
     while True:
+        # El patrón se mira ANTES que el estado: si la línea que se espera ya
+        # salió, no tiene sentido seguir esperando a que el proceso muera.
+        if rx is not None:
+            linea = _buscar_patron(lugar, jid, rx)
+            if linea:
+                return (f"[run_esperar: MATCH de /{hasta_patron}/ tras "
+                        f"~{int(time.time() - t0)}s]\n{linea}\n\n"
+                        + estado(lugar, jid, lineas))
         est = _estado_rapido(lugar, jid)
         if est == "no_existe":
             return (f"No existe el trabajo '{jid}' en {lugar.nombre}. "
@@ -319,15 +363,26 @@ def esperar(lugar: Lugar, jid: str, hasta_segundos: int = 600,
             # TERMINAL: se devuelve el estado y NUNCA el pie de "volver a
             # llamar". Que el pie sea inalcanzable desde aquí es justamente el
             # arreglo: antes se decidía por reloj, sin mirar este estado.
-            return estado(lugar, jid, lineas)
+            final = estado(lugar, jid, lineas)
+            if rx is not None:
+                final += (f"\n\n[run_esperar: el trabajo TERMINÓ sin que "
+                          f"apareciera /{hasta_patron}/ en los logs.]")
+            return final
         transcurrido = time.time() - t0
         if transcurrido >= presupuesto:
             parcial = estado(lugar, jid, lineas)
+            extra = (f" Tampoco apareció aún /{hasta_patron}/."
+                     if rx is not None else "")
+            sugerencia = ("" if rx is not None else
+                          " Si se sabe qué línea se está esperando, "
+                          "'hasta_patron' corta en cuanto aparece y evita la "
+                          "cadena de llamadas.")
             return (parcial + f"\n\n[run_esperar: sigue CORRIENDO tras "
-                    f"~{int(transcurrido)}s. El cliente MCP corta las llamadas "
-                    f"largas, por eso la espera se topa en ~{_TOPE_ESPERA}s. "
-                    f"Volver a llamar run_esperar(id=\"{jid}\", donde=\""
-                    f"{lugar.nombre}\") para seguir esperando.]")
+                    f"~{int(transcurrido)}s.{extra} El cliente MCP corta las "
+                    f"llamadas largas, por eso la espera se topa en "
+                    f"~{_TOPE_ESPERA}s. Volver a llamar run_esperar(id=\""
+                    f"{jid}\", donde=\"{lugar.nombre}\") para seguir "
+                    f"esperando.{sugerencia}]")
         # No pasarse del presupuesto en el último sleep.
         time.sleep(min(intervalo, max(0.2, presupuesto - transcurrido)))
 

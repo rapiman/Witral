@@ -34,7 +34,21 @@ def _escribir_bytes(lugar: Lugar, ruta: str, data: bytes) -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(data)
     else:
+        # En REMOTO la carpeta también se crea sola. sftp.open falla con
+        # "[Errno 2] No such file" si el directorio no existe, y el mensaje no
+        # dice que el problema es la carpeta y no el archivo: obligaba a salir a
+        # hacer `mkdir -p` con run. En local esto ya pasaba; la asimetría entre
+        # los dos lados era el bug.
+        _asegurar_dir_remoto(lugar, ruta)
         T.escribir_remoto(lugar, ruta, data)
+
+
+def _asegurar_dir_remoto(lugar: Lugar, ruta: str) -> None:
+    """mkdir -p del directorio padre de 'ruta' en un lugar remoto."""
+    padre = ruta.replace("\\", "/").rsplit("/", 1)[0] if "/" in ruta else ""
+    if not padre or padre == ruta:
+        return
+    T.ejecutar(lugar, ["mkdir", "-p", padre], timeout=30)
 
 
 def _detectar_eol(texto: str) -> str:
@@ -103,6 +117,12 @@ def subir_b64(lugar: Lugar, ruta: str, contenido_b64: str,
     contenido binario o grande desde afuera (p. ej. el sandbox de Claude) sin
     pelear con el escapado de texto. Con anexar_trozo=True agrega al final:
     permite subir archivos grandes por trozos en varias llamadas.
+
+    ALCANCE REAL: sirve hasta el orden de cientos de KB. Un archivo de varios MB
+    son decenas de llamadas y no es el camino — para eso está la receta de la
+    sección 5 de WITRAL_PARA_CLAUDE.md: bajarlo del sandbox a la máquina del
+    usuario por el puente de dispositivos, y de ahí al lugar remoto con `copiar`
+    (SFTP), que no tiene ese tope.
     """
     import base64
     import re as _re
@@ -123,10 +143,45 @@ def subir_b64(lugar: Lugar, ruta: str, contenido_b64: str,
 
 # --- Escritura simple -------------------------------------------------------
 
-def escribir(lugar: Lugar, ruta: str, contenido: str) -> str:
-    """Crea o sobrescribe el archivo entero."""
+def escribir(lugar: Lugar, ruta: str, contenido: str, eol: str = "auto") -> str:
+    """
+    Crea o sobrescribe el archivo entero, CONSERVANDO el fin de línea del
+    archivo que sobrescribe.
+
+    Un repo con archivos mezclados (uno CRLF, otro LF) obligaba a detectar y
+    restaurar el EOL a mano en cada parche, o el archivo cambiaba entero en el
+    diff. Ahora `escribir` hace lo mismo que las tools de edición: si el archivo
+    existe, el contenido nuevo se normaliza al EOL que ya tenía. Un archivo
+    NUEVO se escribe tal como llega. `eol="lf"`/`"crlf"` fuerza uno; `"tal_cual"`
+    desactiva la normalización.
+
+    La carpeta destino se crea sola si no existe (local y remoto).
+    """
+    nota = ""
+    eol = (eol or "auto").lower()
+    if eol in ("lf", "crlf"):
+        destino_eol = "\n" if eol == "lf" else "\r\n"
+        nota = f" EOL forzado: {eol.upper()}."
+    elif eol == "tal_cual":
+        destino_eol = ""
+    else:
+        destino_eol = ""
+        try:
+            previo = _decodificar(_leer_bytes(lugar, ruta))
+        except (FileNotFoundError, OSError):
+            previo = None
+        if previo is not None and "\n" in previo:
+            destino_eol = _detectar_eol(previo)
+            nota = (f" EOL conservado del archivo previo: "
+                    f"{'CRLF' if destino_eol == chr(13) + chr(10) else 'LF'}.")
+    if destino_eol:
+        # Normalizar a LF primero para no duplicar los \r de un contenido mixto.
+        contenido = contenido.replace("\r\n", "\n")
+        if destino_eol == "\r\n":
+            contenido = contenido.replace("\n", "\r\n")
     _escribir_bytes(lugar, ruta, contenido.encode("utf-8"))
-    return f"Escrito: {ruta} ({len(contenido)} chars) en {lugar.nombre}"
+    return (f"Escrito: {ruta} ({len(contenido)} chars) en {lugar.nombre}."
+            f"{nota}")
 
 
 def anexar(lugar: Lugar, ruta: str, contenido: str) -> str:
@@ -352,6 +407,22 @@ def _pista_escape_unicode(buscado: str, texto: str) -> str:
     return ""
 
 
+def _ubicaciones(texto: str, buscado: str, maximo: int = 10) -> str:
+    """Líneas donde empieza cada aparición de 'buscado', con la línea entera."""
+    lineas = texto.split("\n")
+    primera = buscado.split("\n")[0]
+    encontradas = []
+    pos = texto.find(buscado)
+    while pos != -1 and len(encontradas) < maximo:
+        nro = texto.count("\n", 0, pos) + 1
+        contenido = lineas[nro - 1].strip() if nro - 1 < len(lineas) else primera
+        encontradas.append(f"  linea {nro}: {contenido[:100]}")
+        pos = texto.find(buscado, pos + 1)
+    if pos != -1:
+        encontradas.append("  ... (hay más)")
+    return "Aparece en:\n" + "\n".join(encontradas)
+
+
 def _aplicar_literal(texto: str, ed: EdicionLiteral) -> str:
     # Normalizar saltos en ambos lados a LF: el 'texto' ya viene en LF desde
     # editar(), pero el 'viejo'/'nuevo' que llegan podrían traer CRLF. Así la
@@ -372,8 +443,14 @@ def _aplicar_literal(texto: str, ed: EdicionLiteral) -> str:
         raise EdicionError("El bloque 'viejo' no aparece en el archivo."
                            + _pista_escape_unicode(ed.viejo, texto))
     if n > 1:
+        # Decir DÓNDE está cada aparición, no solo cuántas hay: con las líneas a
+        # la vista se amplía el contexto (o se elige editar_linea) en un intento
+        # y no en tres a ciegas.
         raise EdicionError(
-            f"El bloque 'viejo' aparece {n} veces (ambiguo). Usar edición por línea."
+            f"El bloque 'viejo' aparece {n} veces (ambiguo).\n"
+            + _ubicaciones(texto, ed.viejo)
+            + "\nOpciones: ampliar 'viejo' con una línea de contexto que sea "
+              "única, o editar por número de línea con editar_linea(+ancla)."
         )
     return texto.replace(ed.viejo, ed.nuevo, 1)
 

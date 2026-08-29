@@ -240,13 +240,25 @@ def _verificar_sintaxis_texto(lg, archivo: str) -> str:
 
 
 @mcp.tool()
-def escribir(archivo: str, contenido: str, donde: str = "local") -> str:
-    """Crea o sobrescribe un archivo entero (chicos o nuevos)."""
+def escribir(archivo: str, contenido: str, donde: str = "local",
+             eol: str = "auto") -> str:
+    """
+    Crea o sobrescribe un archivo entero (chicos o nuevos).
+
+    La CARPETA DESTINO se crea sola si no existe, en local y en remoto (antes
+    solo en local: en remoto fallaba con "[Errno 2] No such file", un mensaje
+    que ni siquiera decía que el problema era la carpeta).
+
+    El FIN DE LÍNEA del archivo que se sobrescribe se CONSERVA: en un repo con
+    archivos mezclados (uno CRLF, otro LF) ya no hay que detectarlo y
+    restaurarlo a mano en cada parche. Un archivo nuevo se escribe tal como
+    llega. 'eol' fuerza "lf" o "crlf"; "tal_cual" desactiva la normalización.
+    """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
-        return A.escribir(lg, archivo, contenido)
+        return A.escribir(lg, archivo, contenido, eol)
     except RutaFueraDeRaiz as e:
         return f"error: {e}"
 
@@ -828,7 +840,7 @@ def run_status(id: str = "", donde: str = "local", lineas: int = 40) -> str:
 
 @mcp.tool()
 def run_esperar(id: str, hasta_segundos: int = 600, lineas: int = 40,
-                donde: str = "local") -> str:
+                donde: str = "local", hasta_patron: str = "") -> str:
     """
     Espera (del lado de Witral) a que termine un trabajo de run_async y devuelve
     su estado final, en vez de hacer polling a mano con sleep + run_status.
@@ -841,12 +853,23 @@ def run_esperar(id: str, hasta_segundos: int = 600, lineas: int = 40,
     cubre la espera y detecta el fin en 1-3s (no en el próximo sleep a ciegas).
     'hasta_segundos' es el techo deseado; se acota al tope por llamada. Lectura
     libre (no pide confirmación).
+
+    **'hasta_patron' (regex) es lo que evita la cadena de llamadas**: en vez de
+    esperar a que MUERA el proceso, vuelve en cuanto una línea de los logs
+    (out.log o err.log) matchea. Si se sabe qué línea se está esperando, una
+    batería larga son dos llamadas en vez de diez:
+
+        run_esperar(id, hasta_patron="SONDA IDENTICA|SONDA DIFIERE")
+
+    Devuelve la línea que hizo match, seguida del estado. Si el trabajo termina
+    sin que el patrón aparezca, también vuelve —y lo dice—, así que no puede
+    quedarse esperando algo que ya no va a salir.
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
-        return TR.esperar(lg, id, hasta_segundos, lineas)
+        return TR.esperar(lg, id, hasta_segundos, lineas, hasta_patron)
     except T.TransporteError as e:
         return f"error: {e}"
 
@@ -1804,6 +1827,64 @@ def datastore_set(serial: str, paquete: str, archivo: str, clave: str,
             f"Confirmar con el usuario y reintentar con confirmado=True."
         )
     return M.datastore_set(lg, serial, paquete, archivo, clave, valor, tipo)
+
+
+@mcp.tool()
+def datastore_poblar(serial: str, paquete: str, archivo: str, claves: str,
+                     modo: str = "fusionar", donde: str = "local",
+                     confirmado: bool = False) -> str:
+    """
+    Escribe MUCHAS claves de un Jetpack DataStore en UNA pasada: un solo
+    force-stop, un solo backup, un solo archivo escrito. Es la versión en bloque
+    de datastore_set (que hace todo eso por CADA clave). Para poblar un
+    datastore entero — dejar un POS operativo sin descargar parámetros desde el
+    TMS, montar un banco de pruebas, clonar la config de un terminal a otro —
+    son ~60 llamadas contra una.
+
+    'claves': JSON {clave: valor}. El valor puede ser:
+      - escalar JSON -> el tipo se resuelve así: si la clave YA existe en el
+        archivo se respeta su tipo actual; si no, se infiere del tipo JSON
+        (bool -> bool, entero -> int o long según quepa en int32, decimal ->
+        double, lista -> string_set, resto -> string).
+      - {"tipo": "long", "valor": 0} -> tipo explícito. USARLO cuando el tipo
+        JSON no alcanza: en Kotlin intPreferencesKey("x") y
+        longPreferencesKey("x") son claves DISTINTAS, así que un long escrito
+        donde la app espera int queda invisible para la app y el síntoma es un
+        valor por defecto inexplicable, no un error.
+      - null -> BORRA la clave.
+
+    'modo': "fusionar" (por defecto) conserva las claves que no se mencionan —
+    es lo que hay que usar cuando el propio terminal ya escribió algo ahí (un
+    TID de registro, contadores de operación). "reemplazar" deja el archivo con
+    exactamente las claves entregadas.
+
+    Si el archivo (o files/datastore/) no existe, lo crea. Verifica releyendo y
+    avisa si alguna clave no quedó escrita.
+
+    DESTRUCTIVO (modifica datos persistentes de la app) => requiere
+    confirmado=True. Requiere app debuggable (run-as); en release no funciona.
+    Tras escribir hay que relanzar la app (adb_relanzar) para que cargue.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    if not confirmado:
+        import json as _json
+        try:
+            n = len(_json.loads(claves))
+        except Exception:
+            n = "?"
+        return (
+            f"CONFIRMACIÓN REQUERIDA: se van a escribir {n} claves en el "
+            f"datastore '{archivo}' del paquete '{paquete}' en '{donde}' "
+            f"(modo {modo}).\n"
+            f"Modifica datos persistentes de la app. Se hace backup en /sdcard "
+            f"y se detiene la app antes de escribir; después hay que "
+            f"relanzarla.\n"
+            f"{'ATENCIÓN: modo reemplazar DESCARTA las claves no mencionadas.' if modo == 'reemplazar' else ''}\n"
+            f"Confirmar con el usuario y reintentar con confirmado=True."
+        )
+    return M.datastore_poblar(lg, serial, paquete, archivo, claves, modo)
 
 
 # --- Gradle -----------------------------------------------------------------

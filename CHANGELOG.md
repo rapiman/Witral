@@ -7,6 +7,54 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 16 — esperar la línea, no la muerte del proceso
+
+Feedback de un día entero de uso, ordenado por lo que costó tiempo.
+
+**Añadido**
+- `run_esperar(id, ..., hasta_patron)` — la espera puede terminar por PATRÓN
+  (regex sobre out.log y err.log), no solo cuando muere el proceso. Devuelve la
+  línea que hizo match. Era el punto más caro: nueve llamadas seguidas para una
+  batería, ocho de ellas devolviendo "sigue CORRIENDO", cuando quien llama ya
+  sabe qué línea espera. El tail de los logs ya se hacía para mostrar el estado,
+  así que el grep sale casi gratis. Si el trabajo termina sin que el patrón
+  aparezca, vuelve igual y lo dice: no puede quedarse esperando algo que ya no
+  va a salir.
+- `escribir(..., eol)` para forzar `lf` / `crlf` / `tal_cual`.
+
+**Corregido**
+- `escribir` crea la carpeta destino también en REMOTO. En local ya lo hacía;
+  la asimetría entre los dos lados era el bug, y el `[Errno 2] No such file` de
+  sftp ni siquiera decía que lo que faltaba era la carpeta.
+- `escribir` CONSERVA el fin de línea del archivo que sobrescribe. Las tools de
+  edición ya lo hacían; con `escribir` fuera de esa regla, un repo de archivos
+  mezclados obligaba a detectar y restaurar el EOL a mano en cada parche.
+- `sql`/`psql`: la sentencia se corta a los 40s del lado del SERVIDOR
+  (`statement_timeout` en postgres, `-t` en sqlcmd) y la llamada a los 45s del
+  lado de Witral, ambas por debajo del corte del cliente MCP. Que el que corte
+  sea el servidor es lo que permite afirmar que la sentencia quedó deshecha.
+  Ante un fallo la respuesta agrega un VEREDICTO explícito — no se envió / se
+  envió y el servidor la canceló / se envió y el resultado es INDETERMINADO,
+  con la acción concreta. En una herramienta de base de datos, un "Device did
+  not respond within 60s" que deja sin saber si un UPDATE commiteó no es
+  aceptable.
+- El error de `editar_literal` ambiguo dice cuántas veces aparece el literal
+  **y en qué líneas está cada una**, con la línea completa. Alcanza para ampliar
+  el contexto (o saltar a `editar_linea`) en un intento y no en tres a ciegas.
+
+**Documentado**
+- Traer un archivo de MB desde el sandbox de Claude a un lugar: `subir_b64` no
+  da para eso —decenas de llamadas— y ahora lo dice en su propia descripción. El
+  camino es en dos tramos sin ese tope: puente de dispositivos hasta la máquina
+  del usuario, y de ahí `copiar` por SFTP al lugar remoto.
+
+**Pruebas**
+- `server/pruebas_ronda16.py`: match de patrón inmediato sobre un job vivo,
+  trabajo que termina sin el patrón, regex inválida, preservación de EOL en los
+  dos sentidos y forzado explícito, creación de carpeta, ubicaciones del literal
+  ambiguo (y que el archivo no se toque), y los cuatro veredictos de la capa de
+  base de datos.
+
 ### Ronda 15 — el estado de un trabajo deja de contradecirse; ADB y sqlite
 
 **Corregido**

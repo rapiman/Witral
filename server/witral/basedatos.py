@@ -279,6 +279,16 @@ def psql_archivo(lugar: Lugar, ruta_sql: str, origen: Lugar | None = None,
     return _correr(lugar, db, args, entrada=contenido)
 
 
+# Tope de la SENTENCIA, del lado del servidor (statement_timeout / -t), y tope
+# de la LLAMADA, del lado de Witral. El de la sentencia va primero a propósito:
+# si el que corta es el servidor, la sentencia queda cancelada y deshecha, y se
+# puede afirmar qué pasó. Ambos por debajo del corte del cliente MCP (~60s), que
+# antes se comía la llamada con un "Device did not respond within 60s" que no
+# distinguía "no alcancé a mandarla" de "la mandé y no sé cómo terminó".
+_TOPE_SENTENCIA = 40
+_TOPE_LLAMADA = 45
+
+
 def _entorno(db: DBConfig) -> dict[str, str]:
     """
     Variables de entorno del cliente, por motor. La password SIEMPRE viaja por
@@ -288,7 +298,12 @@ def _entorno(db: DBConfig) -> dict[str, str]:
     if db.motor == "postgres":
         # Timeout de conexión corto (no colgarse si la base no responde) y
         # salida en UTF-8 (evita mojibake al decodificar).
-        env = {"PGCONNECT_TIMEOUT": "10", "PGCLIENTENCODING": "UTF8"}
+        # statement_timeout: que la CANCELACIÓN la haga el servidor, no el
+        # cliente. Es la diferencia entre "no sé si el UPDATE commiteó" y "el
+        # servidor abortó la sentencia y la transacción quedó deshecha". Se fija
+        # por debajo del tope de Witral para que gane siempre el de la base.
+        env = {"PGCONNECT_TIMEOUT": "10", "PGCLIENTENCODING": "UTF8",
+               "PGOPTIONS": f"-c statement_timeout={_TOPE_SENTENCIA * 1000}"}
         if db.password:
             env["PGPASSWORD"] = db.password
         return env
@@ -332,6 +347,9 @@ def _limpiar(motor: str, texto: str) -> str:
 def _correr(lugar: Lugar, db: DBConfig, args: list[str],
             entrada: str | None = None, reintentable: bool = False) -> T.Resultado:
     env_extra = _entorno(db)
+    # sqlcmd no tiene statement_timeout: su equivalente es -t (query timeout).
+    if db.motor == "sqlserver" and "-t" not in args:
+        args = list(args) + ["-t", str(_TOPE_SENTENCIA)]
     # sqlcmd en Windows: el SQL va por archivo (-i), no por stdin (ver
     # _archivo_temporal_sql). En unix sqlcmd sí lee UTF-8 de stdin.
     por_archivo = (db.motor == "sqlserver" and lugar.es_local
@@ -347,7 +365,8 @@ def _correr(lugar: Lugar, db: DBConfig, args: list[str],
             # Con -w (psql) / -l corto (sqlcmd), si la base pide password y no
             # hay credencial el cliente falla al instante en vez de esperar un
             # prompt que nadie va a responder.
-            return T.ejecutar(lugar, args, entrada=entrada, timeout=60,
+            return T.ejecutar(lugar, args, entrada=entrada,
+                              timeout=_TOPE_LLAMADA,
                               env_extra=dict(env_extra))
         linea = " ".join(_q(a) for a in args)
         prefijo = " ".join(f"{k}={_q(v)}" for k, v in env_extra.items())
@@ -358,7 +377,7 @@ def _correr(lugar: Lugar, db: DBConfig, args: list[str],
             linea = f"sudo -u {_q(db.como)} env {prefijo} {linea}"
         elif prefijo:
             linea = f"{prefijo} {linea}"
-        return T.ejecutar(lugar, linea, entrada=entrada, timeout=60)
+        return T.ejecutar(lugar, linea, entrada=entrada, timeout=_TOPE_LLAMADA)
 
     try:
         r = _una_vez()
@@ -378,7 +397,50 @@ def _correr(lugar: Lugar, db: DBConfig, args: list[str],
             except OSError:
                 pass
     return T.Resultado(r.codigo, _limpiar(db.motor, r.salida),
-                       _limpiar(db.motor, r.error))
+                       _limpiar(db.motor, r.error) + _veredicto(db, r))
+
+
+# Marcas de que el SERVIDOR canceló la sentencia (y por lo tanto la deshizo).
+_CANCELADA = (
+    "canceling statement due to statement timeout",   # postgres
+    "cancelando sentencia debido a statement timeout",
+    "query timeout expired",                          # sqlcmd / ODBC
+    "tiempo de espera",                               # sqlcmd en español
+)
+
+
+def _veredicto(db: DBConfig, r: T.Resultado) -> str:
+    """
+    Qué se puede AFIRMAR sobre la suerte de la sentencia cuando algo salió mal.
+    En una herramienta de base de datos, "no respondió" a secas es inaceptable:
+    ante un UPDATE hay que poder decir si commiteó, si quedó deshecho, o si ni
+    siquiera se envió. Los tres casos se distinguen y se dicen con esas palabras.
+    """
+    if r.codigo == 0:
+        return ""
+    texto = f"{r.salida}\n{r.error}".lower()
+    if any(m in texto for m in _CANCELADA):
+        return (f"\n\nVEREDICTO: la sentencia se ENVIÓ y el SERVIDOR la CANCELÓ "
+                f"al pasar {_TOPE_SENTENCIA}s (statement_timeout). Una sentencia "
+                f"cancelada se deshace: NO quedó a medias ni commiteada. Para una "
+                f"consulta legítimamente larga, correrla con run_async sobre el "
+                f"cliente del motor en vez de por esta tool.")
+    if r.codigo == 127 or "no se pudo lanzar el comando" in texto:
+        return ("\n\nVEREDICTO: la sentencia NO se envió — falló el lanzamiento "
+                "del cliente. La base quedó intacta.")
+    if _fallo_conexion(r.error, db.motor):
+        return ("\n\nVEREDICTO: se perdió la CONEXIÓN. Si era una lectura, "
+                "reintentar es inocuo. Si era una escritura, el resultado es "
+                "INDETERMINADO: verificar el estado con un SELECT antes de "
+                "reintentar, nunca reintentar a ciegas.")
+    if r.codigo == 124:
+        return (f"\n\nVEREDICTO: Witral cortó la llamada a los {_TOPE_LLAMADA}s "
+                f"sin que el servidor alcanzara a cancelar. La sentencia se "
+                f"envió y su resultado es INDETERMINADO: verificar con un SELECT "
+                f"antes de reintentar. (Con statement_timeout configurado esto "
+                f"debería ser raro; si se repite, el corte no está en la "
+                f"sentencia sino en la conexión.)")
+    return ""
 
 
 _q = T.comillas  # comilla POSIX: origen único en transporte.comillas

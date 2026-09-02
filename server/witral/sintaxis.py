@@ -142,6 +142,30 @@ def revisar_balance(texto: str, lang: Lenguaje) -> list[Hallazgo]:
             i = fin_linea
             continue
 
+        # ¿String de triple comilla? (docstrings de Python, raw strings / text
+        # blocks de Kotlin y Java). Hay que mirarlo ANTES del string de comilla
+        # simple: si no, cada comilla se trata como delimitador independiente y
+        # el contenido del docstring se escanea como código, produciendo falsos
+        # "']' de cierre sin apertura" y "comilla sin cerrar".
+        triple = None
+        for q in lang.comillas:
+            if texto.startswith(q * 3, i):
+                triple = q * 3
+                break
+        if triple:
+            l0, c0 = linea, col
+            for _ in range(3):
+                avanzar(texto[i]); i += 1
+            cierre = texto.find(triple, i)
+            if cierre == -1:
+                hallazgos.append(Hallazgo(l0, c0,
+                    f"comilla triple {triple} sin cerrar"))
+                break
+            for k in range(i, cierre + 3):
+                avanzar(texto[k])
+            i = cierre + 3
+            continue
+
         # ¿String?
         if c in lang.comillas:
             comilla = c

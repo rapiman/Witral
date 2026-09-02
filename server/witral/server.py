@@ -16,6 +16,8 @@ gradle y búsqueda. (El número de tools cambia; verlo con tool_search, no aquí
 
 from __future__ import annotations
 
+import time as _time
+
 from mcp.server.fastmcp import FastMCP, Image
 
 from . import config as C
@@ -32,6 +34,7 @@ from . import busqueda as B
 from . import sintaxis as SX
 from . import puerto_serial as PS
 from . import trabajos as TR
+from . import bitacora as BIT
 from .config import DestinoDesconocido
 from .seguridad import RutaFueraDeRaiz
 
@@ -68,6 +71,14 @@ def _resolver(donde: str | None):
             f"No se conectó. Confirmar con el usuario y agregar el lugar a la "
             f"config antes de reintentar."
         )
+
+
+def _raiz_local() -> str | None:
+    """Raíz del lugar local: donde vive la bitácora, sea cual sea el destino."""
+    try:
+        return _cfg.resolver(C.LOCAL).raiz
+    except Exception:
+        return None
 
 
 _MAX_SALIDA = 40000  # tope global de chars por bloque de salida
@@ -760,6 +771,7 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
     except ValueError as e:
         return f"error: {e}"
     tope = max(5, min(int(segundos or _RUN_TOPE), _RUN_TOPE))
+    _t0 = _time.monotonic()
     try:
         # cwd = raíz del lugar (si está definida): rutas relativas predecibles.
         r = T.ejecutar(lg, cmd, cwd=lg.raiz or None, timeout=tope)
@@ -771,6 +783,8 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
                            timeout=tope)
             nota = ("[shell=auto: cmd falló por sintaxis/comando no reconocido; "
                     "reintentado en PowerShell]")
+        BIT.anotar(_raiz_local(), donde, "run", comando, confirmado,
+                   r.codigo, int((_time.monotonic() - _t0) * 1000))
         salida = _fmt(r, max_salida=max_salida)
         if r.codigo == 124:
             salida += (
@@ -781,6 +795,8 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
                 f"run_status(id) / run_esperar(id).")
         return f"{nota}\n{salida}" if nota else salida
     except T.TransporteError as e:
+        BIT.anotar(_raiz_local(), donde, "run", comando, confirmado,
+                   "transporte", int((_time.monotonic() - _t0) * 1000))
         return f"error: {e}"
 
 
@@ -806,6 +822,9 @@ def run_async(comando: str, donde: str = "local", confirmado: bool = False,
             f"en '{donde}':\n  {comando}\n"
             f"Mostrar el comando al usuario y reintentar con confirmado=True."
         )
+    # Se anota el comando ORIGINAL, antes de envolverlo en el shell: es lo que
+    # se pidió, y es lo que sirve para leer la bitácora después.
+    BIT.anotar(_raiz_local(), donde, "run_async", comando, confirmado, "lanzado", "")
     try:
         comando, nota = _envolver_shell(lg, comando, shell)
     except ValueError as e:
@@ -821,16 +840,24 @@ def run_async(comando: str, donde: str = "local", confirmado: bool = False,
 
 
 @mcp.tool()
-def run_status(id: str = "", donde: str = "local", lineas: int = 40) -> str:
+def run_status(id: str = "", pid: str = "", donde: str = "local",
+               lineas: int = 40) -> str:
     """
     Estado de un trabajo lanzado con run_async: corriendo/terminado, código de
     salida y las últimas 'lineas' de out.log y err.log. Sin id, lista los
-    últimos trabajos del lugar. Lectura libre (no pide confirmación).
+    últimos trabajos del lugar. Con 'pid' (en vez de id), dice si ese proceso
+    sigue vivo — para procesos huérfanos cuyo registro de trabajo se perdió.
+    Lectura libre (no pide confirmación).
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
+        if pid:
+            try:
+                return TR.estado_pid(lg, int(pid))
+            except ValueError:
+                return f"error: 'pid' debe ser un número entero, no '{pid}'."
         if not id:
             return TR.listar(lg)
         return TR.estado(lg, id, lineas)
@@ -875,20 +902,31 @@ def run_esperar(id: str, hasta_segundos: int = 600, lineas: int = 40,
 
 
 @mcp.tool()
-def run_matar(id: str, donde: str = "local", confirmado: bool = False) -> str:
+def run_matar(id: str = "", pid: str = "", donde: str = "local",
+              confirmado: bool = False) -> str:
     """
-    Mata un trabajo lanzado con run_async: termina el ÁRBOL completo de
-    procesos (taskkill /T en Windows, kill del grupo en unix) y marca el
-    trabajo como 'matado'. Requiere confirmado=True.
+    Mata un trabajo lanzado con run_async (por 'id') o un proceso huérfano (por
+    'pid', para el server local que quedó fuera del registro): termina el ÁRBOL
+    completo (taskkill /T en Windows, kill del grupo en unix). Requiere
+    confirmado=True. Sin 'id' ni 'pid', avisa que falta qué matar.
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
+    if not id and not pid:
+        return ("Falta qué matar: pasar 'id' (trabajo de run_async) o 'pid' "
+                "(proceso huérfano cuyo registro se perdió).")
     if not confirmado:
-        return (f"CONFIRMACIÓN REQUERIDA: run_matar terminará el trabajo '{id}' "
+        objetivo = f"el pid {pid}" if pid else f"el trabajo '{id}'"
+        return (f"CONFIRMACIÓN REQUERIDA: run_matar terminará {objetivo} "
                 f"en '{donde}' con todo su árbol de procesos. "
                 f"Reintentar con confirmado=True.")
     try:
+        if pid:
+            try:
+                return TR.matar_pid(lg, int(pid))
+            except ValueError:
+                return f"error: 'pid' debe ser un número entero, no '{pid}'."
         return TR.matar(lg, id)
     except T.TransporteError as e:
         return f"error: {e}"

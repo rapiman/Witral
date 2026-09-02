@@ -9,6 +9,8 @@ remoto, vía SSH con `cd <repo> && git ...`.
 
 from __future__ import annotations
 
+import re
+
 from .config import Lugar
 from .seguridad import normalizar
 from . import transporte as T
@@ -63,13 +65,58 @@ def fetch(lugar: Lugar, repo: str) -> T.Resultado:
     return _git(lugar, repo, ["fetch", "--all"])
 
 
+_ATRIBUCION = re.compile(
+    r"^(?:Co-Authored-By:.*(?:Claude|Anthropic|noreply@anthropic).*"
+    r"|Claude-Session:.*"
+    r"|.*Generated with \[Claude Code\].*"
+    r"|.*https://claude\.ai/code/session_.*)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _sin_atribucion(mensaje: str) -> tuple[str, list[str]]:
+    """
+    Saca del mensaje de commit las líneas que atribuyen el trabajo a Claude.
+
+    Los commits de estos repos van a nombre de quien los pide, no del modelo que
+    los redactó. La herramienta lo agrega por omisión y ya se coló una vez
+    (02c9ba3 en bcipagos-posintegrado-demo), que costó reescribir la historia
+    completa del repo para sacarlo.
+
+    Esto es una red, no la defensa principal: solo cubre los commits que pasan
+    por esta función. Un 'git commit' lanzado con run() no la toca -- para eso
+    está el hook commit-msg. Devuelve el mensaje limpio y las líneas quitadas,
+    para poder avisar en vez de borrar en silencio.
+    """
+    quitadas = [ln.strip() for ln in _ATRIBUCION.findall(mensaje)] \
+        if _ATRIBUCION.search(mensaje) else []
+    if not quitadas:
+        return mensaje, []
+    limpio = _ATRIBUCION.sub("", mensaje)
+    # Colapsa las líneas en blanco que quedaron donde estaban los trailers.
+    limpio = re.sub(r"\n{3,}", "\n\n", limpio).strip()
+    return limpio, quitadas
+
+
 def commit(lugar: Lugar, repo: str, mensaje: str = "", todos: bool = False,
            merge: bool = False) -> T.Resultado:
     """
     git commit. Con 'mensaje' usa -m. Con 'merge'=True y SIN mensaje, sella un
     merge en curso usando el mensaje automático que git ya preparó (--no-edit,
     toma MERGE_MSG). Si se da mensaje, se usa ese aunque merge=True.
+
+    El mensaje se limpia de atribuciones a Claude antes de commitear, y si había
+    alguna se avisa en la salida.
     """
+    aviso = ""
+    if mensaje:
+        mensaje, quitadas = _sin_atribucion(mensaje)
+        if quitadas:
+            aviso = ("[witral] Se quitaron del mensaje estas lineas de atribucion:\n"
+                     + "\n".join("  - " + q for q in quitadas) + "\n")
+        if not mensaje:
+            return T.Resultado(1, "", "El mensaje quedo vacio despues de sacar la "
+                                      "atribucion. Hay que escribir un mensaje real.")
     if merge and not mensaje:
         args = ["commit", "--no-edit"]
     elif mensaje:
@@ -79,7 +126,10 @@ def commit(lugar: Lugar, repo: str, mensaje: str = "", todos: bool = False,
                                   "un merge con el mensaje automático).")
     if todos:
         args.insert(1, "-a")
-    return _git(lugar, repo, args)
+    r = _git(lugar, repo, args)
+    if aviso:
+        r = T.Resultado(r.codigo, aviso + (r.salida or ""), r.error)
+    return r
 
 
 def push(lugar: Lugar, repo: str, forzar: bool = False) -> T.Resultado:

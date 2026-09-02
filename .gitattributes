@@ -1,0 +1,4 @@
+# El hook es un script de shell: si git lo deja con CRLF al clonar en Windows,
+# /bin/sh falla con "bad interpreter" y el hook no corre -- silenciosamente, que
+# es la peor forma de que falle una defensa.
+hooks/* text eol=lf

@@ -1,0 +1,44 @@
+#!/bin/sh
+#
+# Saca del mensaje de commit cualquier atribucion a Claude.
+#
+# Los commits de estos repos van a nombre de quien los pide, no del modelo que
+# los redacto. La herramienta lo agrega por omision y ya se colo una vez
+# (02c9ba3 en bcipagos-posintegrado-demo), que costo reescribir la historia
+# completa del repo para sacarlo.
+#
+# Este hook corre pase lo que pase: git_commit de witral, un 'git commit'
+# lanzado con run(), el IDE, o a mano. Es la unica capa que no se saltea.
+#
+# Se instala una sola vez para todos los repos de la maquina:
+#   git config --global core.hooksPath <carpeta que contiene este archivo>
+# Se desactiva con:
+#   git config --global --unset core.hooksPath
+#
+# Ojo: un repo que defina su propio core.hooksPath gana sobre el global.
+
+MENSAJE="$1"
+
+PATRON='^Co-Authored-By:.*([Cc]laude|[Aa]nthropic|noreply@anthropic).*$|^Claude-Session:.*$|^.*Generated with \[Claude Code\].*$|^.*https://claude\.ai/code/session_.*$'
+
+QUITADAS=$(grep -E "$PATRON" "$MENSAJE" 2>/dev/null)
+
+if [ -n "$QUITADAS" ]; then
+  grep -vE "$PATRON" "$MENSAJE" > "$MENSAJE.limpio" 2>/dev/null
+  # Colapsa las lineas en blanco que quedaron donde estaban los trailers.
+  awk 'BEGIN{vacias=0} /^[[:space:]]*$/{vacias++; next} {while(vacias>0 && NR>vacias){print ""; vacias--} vacias=0; print} END{}' \
+      "$MENSAJE.limpio" > "$MENSAJE.limpio2" 2>/dev/null
+  mv "$MENSAJE.limpio2" "$MENSAJE"
+  rm -f "$MENSAJE.limpio"
+
+  echo "[commit-msg] Se quitaron estas lineas de atribucion del mensaje:" >&2
+  echo "$QUITADAS" | sed 's/^/  - /' >&2
+
+  # Si no quedo nada, no se sella un commit sin mensaje.
+  if ! grep -q '[^[:space:]]' "$MENSAJE"; then
+    echo "[commit-msg] El mensaje quedo vacio. Hay que escribir uno real." >&2
+    exit 1
+  fi
+fi
+
+exit 0

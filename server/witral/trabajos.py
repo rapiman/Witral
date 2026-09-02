@@ -426,7 +426,10 @@ def matar(lugar: Lugar, jid: str) -> str:
     if lugar.es_local:
         base = _dir_jobs_local(lugar) / jid
         if not base.exists():
-            return f"No existe el trabajo '{jid}' en {lugar.nombre}."
+            return (f"No existe el trabajo '{jid}' en {lugar.nombre} "
+                    f"(el registro se perdió o expiró). Si el proceso sigue "
+                    f"vivo, ubicar su pid con procesos() y matarlo con "
+                    f"run_matar(pid=...).")
         if (base / "codigo").exists():
             return f"El trabajo {jid} ya había terminado (código " \
                    f"{(base / 'codigo').read_text(errors='replace').strip()})."
@@ -452,12 +455,57 @@ def matar(lugar: Lugar, jid: str) -> str:
     b = f"{_DIR_REMOTO}/{jid}"
     linea = (
         f"b={_q(b)}; "
-        f"if [ ! -d \"$b\" ]; then echo \"No existe el trabajo {jid}\"; exit 0; fi; "
+        f"if [ ! -d \"$b\" ]; then echo \"No existe el trabajo {jid} (registro perdido); si el proceso sigue vivo, matar con run_matar(pid=...)\"; exit 0; fi; "
         f"if [ -f \"$b/codigo\" ]; then echo \"Ya había terminado (código $(cat \"$b/codigo\"))\"; exit 0; fi; "
         f"pid=$(cat \"$b/pid\" 2>/dev/null); "
         f"if [ -z \"$pid\" ]; then echo 'Sin pid registrado'; exit 0; fi; "
         f"kill -9 -- -\"$pid\" 2>/dev/null || kill -9 \"$pid\" 2>/dev/null; "
         f"echo matado > \"$b/codigo\"; echo \"Trabajo {jid} matado (grupo $pid)\""
     )
+    r = T.ejecutar(lugar, linea, timeout=30)
+    return r.salida.strip() if r.ok else f"error: {r.error or r.salida}"
+
+
+# --- Por PID (procesos huérfanos sin registro de trabajo) --------------------
+
+def estado_pid(lugar: Lugar, pid: int) -> str:
+    """Dice si 'pid' sigue vivo. Para procesos cuyo registro de trabajo se
+    perdió (server local que quedó fuera de .witral/jobs)."""
+    if lugar.es_local:
+        vivo = _pid_vivo_local(pid)
+        return (f"El pid {pid} está VIVO en {lugar.nombre}."
+                if vivo else f"El pid {pid} NO está vivo en {lugar.nombre}.")
+    linea = (f"if kill -0 {pid} 2>/dev/null; then "
+             f"echo \"El pid {pid} está VIVO en {lugar.nombre}.\"; "
+             f"else echo \"El pid {pid} NO está vivo en {lugar.nombre}.\"; fi")
+    r = T.ejecutar(lugar, linea, timeout=30)
+    return r.salida.strip() if r.ok else f"error: {r.error or r.salida}"
+
+
+def matar_pid(lugar: Lugar, pid: int) -> str:
+    """Mata el árbol de 'pid' sin necesitar registro de trabajo. Para el caso
+    del server local que sigue vivo aunque su job_id ya no exista."""
+    if lugar.es_local:
+        if os.name == "nt":
+            r = subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)],
+                               capture_output=True, timeout=15)
+            if r.returncode != 0:
+                detalle = (r.stderr or r.stdout or b"").decode(
+                    "utf-8", errors="replace").strip()
+                return (f"No se pudo matar el pid {pid}. taskkill: "
+                        f"{detalle or 'sin salida'}")
+        else:
+            import signal
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except Exception:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except Exception:
+                    return (f"No se pudo matar el pid {pid} (no existe o ya "
+                            f"no responde).")
+        return f"Pid {pid} matado (árbol completo) en {lugar.nombre}."
+    linea = (f"kill -9 -- -{pid} 2>/dev/null || kill -9 {pid} 2>/dev/null; "
+             f"echo \"Pid {pid} matado en {lugar.nombre}.\"")
     r = T.ejecutar(lugar, linea, timeout=30)
     return r.salida.strip() if r.ok else f"error: {r.error or r.salida}"

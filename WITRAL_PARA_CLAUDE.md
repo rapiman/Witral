@@ -48,6 +48,11 @@ local o remoto. Un Windows remoto por SSH usaria `taskkill`; un Linux local usar
   lo vuelca entero). Con `desde`/`hasta`: solo ese rango de lineas, numerado (forma
   correcta de mirar archivos grandes, y de ubicar numeros antes de editar por linea).
   Con `cola=N`: las ultimas N lineas (logs, resultados; en remoto usa tail).
+  **Con `esquema=True` (ronda 17): el INDICE, no el contenido** — encabezados de un `.md`, o
+  firmas (def/class/function/fun/interface/type) de un archivo de codigo, con su numero de
+  linea. Frente a un archivo de miles de lineas lo primero que se quiere no es un rango sino
+  el indice, y es el indice el que dice que rango pedir despues. Reemplaza el
+  `grep -n '^#'` por `run`.
 - `escribir(archivo, contenido, donde, eol)` — crea o SOBRESCRIBE el archivo entero. Para
   nuevos o chicos, SOLO TEXTO. Desde la ronda 16: **la carpeta destino se crea sola** en local
   Y en remoto (antes en remoto fallaba con `[Errno 2] No such file`, mensaje que ni siquiera
@@ -65,7 +70,14 @@ local o remoto. Un Windows remoto por SSH usaria `taskkill`; un Linux local usar
   `crlf`. Para pasar archivos clonados en Windows (CRLF) a LF, o limpiar saltos mezclados.
   Reescribe todo el archivo (en git aparece como muchas lineas cambiadas). Para editar contenido
   NO se usa: las tools de edicion ya preservan el EOL.
-- `listar(ruta, donde)` — contenido de un directorio.
+- `listar(ruta, donde)` — contenido de un directorio. Acepta VARIAS rutas separadas por
+  espacios o comas: en remoto se resuelven con UNA ida y vuelta (ronda 17).
+- `leer_varios(archivos, donde, max_chars)` (ronda 17) — el contenido de VARIOS archivos en UNA
+  llamada, cada uno con su delimitador `===== ruta =====`. Existe por un problema de
+  INCENTIVOS: con archivos remotos cada ida y vuelta cuesta, y una tool que hace exactamente
+  una cosa por llamada empuja a encadenar seis comandos con `&&` por `run` —la escotilla sin
+  tipar, la que pide confirmacion— solo para ahorrar viajes. Lo barato terminaba siendo lo
+  inseguro; con esto la opcion barata vuelve a ser la segura.
 - `crear_carpeta(ruta, donde)`.
 - `mover(origen, destino, donde)` — mover/renombrar DENTRO de un mismo lugar.
 - `borrar(ruta, donde, confirmado)` — NO elimina: mueve a `.witral/papelera/` con timestamp
@@ -79,6 +91,9 @@ local o remoto. Un Windows remoto por SSH usaria `taskkill`; un Linux local usar
   CONTENIDO (que texto). Desde la ronda 16, cuando el literal es AMBIGUO el error dice cuantas
   veces aparece **y en que lineas esta cada una**, con la linea completa: alcanza para ampliar
   el contexto (o saltar a `editar_linea`) en un intento y no en tres a ciegas.
+  ALIAS (ronda 17): `buscar`/`reemplazar` valen como sinonimos de `viejo`/`nuevo`. Son los
+  nombres que uno prueba primero, y antes devolvian un volcado crudo de validacion en vez de
+  una edicion — una llamada perdida por adivinar mal un nombre.
 - `editar_linea(archivo, desde, hasta, nuevo, ancla, linea, donde)` — reemplaza ese rango de
   lineas. Inmune a CRLF/whitespace. Ubica por POSICION (que lineas). Para UNA sola linea:
   pasar `linea=N` (alias comodo de desde=hasta=N) u omitir `hasta`. El parametro `ancla` (muy
@@ -103,8 +118,18 @@ editadas +-2) para verificar en el acto sin un `leer` con rango aparte.
   - **Universal** (siempre, todos los lenguajes): balance de `()[]{}`, comillas y comentarios
     sin cerrar, ignorando strings y comentarios. Atrapa el error de edicion mas comun. Local y remoto.
   - **Nativa**: para JSON/YAML/TOML valida con la libreria de Python (json, pyyaml, tomllib) y
-    da linea/col del error — funciona local y remoto. Para lenguajes con binario instalado y en
-    local, chequeo real (`node --check`, `py_compile`, `php -l`, `gcc -fsyntax-only`, `perl -c`).
+    da linea/col del error. Para los demas lenguajes, chequeo real con el binario
+    (`node --check`, `py_compile`, `php -l`, `gcc -fsyntax-only`, `perl -c`, `ruby -c`) —
+    **desde la ronda 17 tambien EN LUGARES REMOTOS**, corriendo el verificador por SSH sobre el
+    archivo que ya vive alla. Antes en remoto quedaba solo la capa universal, que es la menos
+    util de las dos, y justamente el servidor es donde suelen estar instalados php, node y tsc.
+    En unix se prueba `python3` antes que `python` y `nodejs` como alternativa de `node`.
+- `verificar_tipos(proyecto, donde)` (ronda 17) — `tsc --noEmit` sobre la carpeta con el
+  tsconfig.json. Tapa un agujero concreto: **un `npm run build` puede devolver 0 con errores de
+  TypeScript adentro** (segun el bundler, los tipos ni se miran), asi que "el build paso" no
+  significa "compila". `tsc --noEmit` si falla, y como corre con el tsconfig del proyecto no
+  tiene los falsos positivos de verificar un `.ts` suelto (donde cada import propio sale como
+  modulo no encontrado). Puede tardar: si el proyecto es grande, lanzarlo con `run_async`.
   - Reconoce: kt, kts, java, c, h, cpp, js, jsx, ts, php, py, sql, html, xml, css, sh, rb, pl,
     json, yaml, yml, toml.
   - No reemplaza al compilador. Para Kotlin (sin verificador nativo posible) da solo la universal,
@@ -191,6 +216,21 @@ llamada. Si se quiere a mano: `git_status` -> `git_add` -> `git_diff` -> `git_co
 - `matar_proceso(patron, donde, confirmado)` — `taskkill`/`pkill`.
 - `servicio(accion, nombre, donde, confirmado)` — status/start/stop/restart (`sc`/`systemctl`).
   `status` es lectura; el resto pide confirmacion.
+
+### Sincronizar un ARBOL (ronda 17)
+- `sincronizar(origen, destino, excluir, borrar, seco, confirmado)` — rsync -a entre dos rutas
+  del MISMO lugar unix. `desplegar` cubre UN archivo; esto cubre el arbol, que es el patron
+  real de un despliegue web (repo -> webroot con varios excludes) y venia escribiendose a mano
+  por `run` en cada sesion.
+- **El `--delete` NO corre a ciegas**: con `borrar=True` (por defecto) y sin `confirmado=True`
+  se corre un ENSAYO y vuelve la lista EXACTA de lo que se borraria en el destino. La decision
+  se toma mirando los archivos, no releyendo el comando — que es donde un exclude mal tipeado
+  se lleva `images/uploads/` sin preguntar. `seco=True` fuerza el ensayo aunque haya
+  confirmacion; `borrar=False` sincroniza sin borrar.
+- Al origen se le FUERZA la barra final: siempre se sincroniza el CONTENIDO del directorio.
+  La variante sin barra (que mete el directorio adentro del destino) casi nunca es la buscada.
+- `excluir`: patrones separados por espacios. Entre lugares distintos no aplica (ahi va
+  `copiar`, por SFTP); en Windows tampoco hay rsync y la respuesta lo dice.
 
 ### Copiar y desplegar entre lugares
 - `copiar(origen, destino, ...)` — copia un archivo entre lugares (SFTP). Forma COMPACTA
@@ -440,6 +480,10 @@ app **debuggable** (en release no hay acceso).
 | Comando arbitrario (ultimo recurso)          | `run` (siempre confirmado)            |
 | Ver por que fallo un build                   | `gradle_errores(job_id)`              |
 | Esperar una LINEA concreta de un trabajo     | `run_esperar(id, hasta_patron="...")` |
+| Sincronizar repo -> webroot (con --delete)   | `sincronizar` (ensayo primero)        |
+| Ver el indice de un archivo largo            | `leer(archivo, esquema=True)`         |
+| Leer varios archivos remotos de una          | `leer_varios("a.php b.php")`          |
+| Saber si el build tiene errores de tipos     | `verificar_tipos(proyecto, donde)`    |
 | Llevar un archivo de MB al lugar remoto      | puente -> maquina -> `copiar` (seccion 5) |
 | Saber que build esta instalada en el POS     | `adb_estado_app(serial, paquete)`     |
 | Instalar sobre una version mas nueva         | `adb_install(..., permitir_downgrade=True)` |
@@ -694,7 +738,34 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
 
 ## 7. ESTADO Y PENDIENTES (para retomar desde otra conversacion)
 
-### Ultima sesion (2026-08-28, ronda 16: feedback de un dia entero de uso)
+### Ultima sesion (2026-09-10, ronda 17: sesion de sitio web)
+
+Cinco puntos. Validado con `server/pruebas_ronda17.py` (35 aserciones) y las rondas 14-16 en
+verde.
+
+1. **`sincronizar(origen, destino, excluir, borrar, seco, confirmado)`** — faltaba sincronizar
+   un ARBOL, no un archivo. El `--delete` no corre a ciegas: sin `confirmado` se hace un ensayo
+   y vuelve la lista exacta de lo que se borraria. El riesgo real no era el rsync sino decidir
+   mirando el COMANDO en vez de mirar los ARCHIVOS.
+2. **Capa nativa de `verificar_sintaxis` en lugares REMOTOS.** Corre el verificador por SSH
+   sobre el archivo que ya esta alla. Antes se degradaba a la capa universal justo donde estan
+   instalados php, node y tsc. Ademas `verificar_tipos(proyecto)` = `tsc --noEmit`, que es lo
+   que atrapa el `npm run build` que devuelve 0 con errores de TypeScript adentro.
+3. **`leer_varios` y `listar` con varias rutas.** El problema era de INCENTIVOS: una tool por
+   llamada empujaba a encadenar seis comandos con `&&` por `run`, o sea que lo barato era lo
+   inseguro. En remoto ambas resuelven con una sola ida y vuelta.
+4. **`editar_literal` acepta `buscar`/`reemplazar`** como alias de `viejo`/`nuevo`, y si falta
+   el texto lo dice en castellano en vez de volcar la validacion cruda.
+5. **`leer(esquema=True)`** — el indice del archivo (encabezados de .md, firmas de codigo) con
+   numeros de linea. Es el primer paso natural ante un archivo largo, y el que dice que rango
+   pedir despues.
+
+Lo que el feedback confirma que NO hay que tocar: `escribir` conservando el fin de linea y
+diciendolo; el backup de `editar_literal` con la ruta a la vista; el corte a 45s con codigo 124
+y el consejo de pasar a `run_async`; y `psql` con `base=` (por `run`, psql pide autenticacion
+y falla).
+
+### Sesion anterior (2026-08-28, ronda 16: feedback de un dia entero de uso)
 
 Seis puntos, ordenados por lo que costo tiempo. Validado con
 `server/pruebas_ronda16.py` (27 aserciones) mas las rondas 14 y 15 en verde.

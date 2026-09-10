@@ -120,18 +120,26 @@ def lugares() -> str:
 
 @mcp.tool()
 def leer(archivo: str, desde: int = 0, hasta: int = 0, donde: str = "local",
-         cola: int = 0) -> str:
+         cola: int = 0, esquema: bool = False) -> str:
     """
     Lee un archivo. Sin desde/hasta: archivo completo (chicos). Con desde/hasta:
     solo ese rango de líneas, numeradas (forma correcta de mirar archivos
     grandes). Con cola=N: las últimas N líneas (logs, resultados). Autodefensa:
     un archivo grande leído sin rango no se vuelca entero — se devuelve el
     comienzo + totales + cómo seguir (rango, cola o buscar_contenido).
+
+    **esquema=True: el ÍNDICE del archivo, no su contenido.** Encabezados de un
+    .md, o firmas (def/class/function/fun/interface) de un archivo de código,
+    con su número de línea. Frente a un archivo de miles de líneas, lo primero
+    que se quiere no es un rango sino el índice — y es el índice el que dice qué
+    rango pedir después. Reemplaza el `grep -n '^#'` por run.
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
+        if esquema:
+            return A.esquema(lg, archivo)
         if cola:
             return A.leer_cola(lg, archivo, cola)
         if desde or hasta:
@@ -158,9 +166,12 @@ def verificar_sintaxis(archivo: str, donde: str = "local") -> str:
     1) UNIVERSAL (siempre, todos los lenguajes): balance de ()[]{}, comillas y
        comentarios sin cerrar, ignorando strings y comentarios. Atrapa el error
        de edición más común. Funciona en local y remoto.
-    2) NATIVA (si la herramienta está instalada y el lugar es local): chequeo
-       real con el verificador del lenguaje (node --check, py_compile, php -l,
-       gcc -fsyntax-only, perl -c, ruby -c).
+    2) NATIVA: chequeo real con el verificador del lenguaje (node --check,
+       py_compile, php -l, gcc -fsyntax-only, perl -c, ruby -c). Corre tanto en
+       local como EN EL LUGAR REMOTO por SSH (ronda 17): los binarios suelen
+       estar instalados en el servidor, así que ahí también se usa el chequeo
+       bueno y no solo el balance de delimitadores.
+       Para TIPOS de TypeScript, ver verificar_tipos (un .ts suelto no alcanza).
     Reconoce: kt, kts, java, c, h, cpp, js, jsx, ts, php, py, sql, html, xml,
     css, sh, rb, pl. No reemplaza al compilador: es una red rápida antes de
     mover o compilar.
@@ -169,6 +180,62 @@ def verificar_sintaxis(archivo: str, donde: str = "local") -> str:
     if aviso:
         return aviso
     return _verificar_sintaxis_texto(lg, archivo)
+
+
+@mcp.tool()
+def leer_varios(archivos: str, donde: str = "local",
+                max_chars: int = 20000) -> str:
+    """
+    Lee VARIOS archivos en UNA sola llamada. 'archivos': rutas separadas por
+    espacios, comas o saltos de línea (una ruta con espacios va entre comillas
+    dobles).
+
+    Por qué existe: con archivos remotos cada ida y vuelta cuesta, y una tool
+    que hace exactamente una cosa por llamada empuja a encadenar seis comandos
+    con && por `run` —la escotilla sin tipar, la que pide confirmación— solo
+    para ahorrar viajes. El incentivo quedaba al revés: lo barato terminaba
+    siendo lo inseguro. En remoto esto resuelve todo con UN comando.
+    Cada archivo llega precedido de `===== ruta =====`. Solo lectura.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        return _truncar(A.leer_varios(lg, archivos, max_chars))
+    except (RutaFueraDeRaiz, FileNotFoundError, ValueError) as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
+def verificar_tipos(proyecto: str, donde: str = "local") -> str:
+    """
+    Chequeo de TIPOS de un proyecto TypeScript: `tsc --noEmit` sobre la carpeta
+    que tiene el tsconfig.json, en el lugar indicado.
+
+    Existe por un agujero concreto: un `npm run build` puede devolver 0 con
+    errores de TypeScript adentro (según el bundler, los tipos ni se miran), así
+    que "el build pasó" no significa "compila". `tsc --noEmit` sí falla, y como
+    corre con el tsconfig del proyecto no tiene los falsos positivos de
+    verificar un .ts suelto (donde cada import propio sale como módulo no
+    encontrado). Solo lectura, no escribe nada. Puede tardar: se corre con tope
+    amplio, y si el proyecto es grande conviene lanzarlo con run_async.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        r = SX.tsc_proyecto(lg, proyecto)
+    except T.TransporteError as e:
+        return f"error: {e}"
+    if r is None:
+        return (f"No hay `tsc` disponible en {donde} (ni global ni en "
+                f"node_modules del proyecto). Instalarlo ahí, o correr "
+                f"`npx tsc --noEmit -p {proyecto}` por run.")
+    ok, salida = r
+    if ok:
+        return f"tsc --noEmit sobre {proyecto} en {donde}: SIN errores de tipos."
+    return (f"tsc --noEmit sobre {proyecto} en {donde}: ERRORES de tipos.\n"
+            + _truncar(salida, 20000))
 
 
 def _verificar_sintaxis_texto(lg, archivo: str) -> str:
@@ -245,7 +312,25 @@ def _verificar_sintaxis_texto(lg, archivo: str) -> str:
                 partes.append("CAPA NATIVA — errores:")
                 partes.append(salida or "(sin detalle)")
     else:
-        partes.append("CAPA NATIVA — omitida (lugar remoto; solo capa universal).")
+        # REMOTO: la capa nativa corre EN EL LUGAR (ronda 17). php, node y tsc
+        # suelen estar instalados justo ahí, así que degradar a la capa
+        # universal era quedarse con la menos útil de las dos donde había con
+        # qué hacer la buena.
+        nat = SX.correr_nativo_remoto(lg, ext, archivo)
+        if nat is None:
+            v = SX.NATIVOS.get(ext)
+            falta = (f"'{v.binario}' no está instalado en {lg.nombre}"
+                     if v else f"no hay verificador nativo para {ext}")
+            partes.append(
+                f"CAPA NATIVA — {falta}; solo capa universal. ATENCION: el "
+                f"'balance OK' cubre SOLO delimitadores — no ve referencias sin "
+                f"resolver, imports faltantes ni tipos.")
+        else:
+            ok, salida = nat
+            partes.append("CAPA NATIVA — sintaxis OK." if ok
+                          else "CAPA NATIVA — errores:")
+            if not ok:
+                partes.append(salida or "(sin detalle)")
 
     return "\n".join(partes)
 
@@ -325,17 +410,32 @@ def convertir_eol(archivo: str, a: str, donde: str = "local") -> str:
 
 
 @mcp.tool()
-def editar_literal(archivo: str, viejo: str, nuevo: str, verificar: bool = False,
-                   donde: str = "local") -> str:
+def editar_literal(archivo: str, viejo: str = "", nuevo: str = "",
+                   verificar: bool = False, donde: str = "local",
+                   buscar: str = "", reemplazar: str = "") -> str:
     """
     Reemplaza una ocurrencia EXACTA y única de 'viejo' por 'nuevo'. Falla si no
-    aparece o aparece más de una vez. Backup automático, CRLF preservado.
+    aparece o aparece más de una vez (y ahí dice EN QUÉ LÍNEAS está cada una).
+    Backup automático, EOL del archivo preservado.
+
+    ALIAS: 'buscar'/'reemplazar' se aceptan como sinónimos de 'viejo'/'nuevo'.
+    Son los nombres que uno prueba primero, y antes devolvían un volcado crudo
+    de validación en vez de una edición — una llamada perdida por adivinar mal
+    un nombre. Mismo criterio que `buscar_nombre`, que acepta `proyecto` por
+    `objetivo`.
+
     Con 'verificar'=True corre verificar_sintaxis tras editar y agrega el
     resultado en la misma respuesta (al editar código, ahorra una llamada).
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
+    viejo = viejo or buscar
+    nuevo = nuevo if nuevo != "" else reemplazar
+    if not viejo:
+        return ("Falta el texto a reemplazar: 'viejo' (o su alias 'buscar'). "
+                "Los parámetros son editar_literal(archivo, viejo, nuevo); "
+                "'buscar'/'reemplazar' funcionan igual.")
     try:
         res = A.editar(lg, archivo, literales=[A.EdicionLiteral(viejo, nuevo)])
     except (RutaFueraDeRaiz, FileNotFoundError, A.EdicionError) as e:
@@ -398,12 +498,22 @@ def editar_linea(archivo: str, desde: int = 0, hasta: int = 0, nuevo: str = "",
 
 
 @mcp.tool()
-def listar(ruta: str = ".", donde: str = "local") -> str:
-    """Lista el contenido de un directorio."""
+def listar(ruta: str = ".", donde: str = "local") -> str:  # noqa: D401
+    """
+    Lista el contenido de un directorio. Acepta VARIAS rutas separadas por
+    espacios o comas: en remoto se resuelven con UNA sola ida y vuelta, en vez
+    de una llamada por carpeta (que es lo que empujaba a encadenar `ls` por
+    `run`). Una ruta con espacios va entre comillas dobles.
+    """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
+        # VARIAS rutas en una llamada (separadas por espacios o comas): en
+        # remoto se resuelven con un solo comando, en vez de una ida y vuelta
+        # por carpeta.
+        if len(A._partir_rutas(ruta)) > 1:
+            return _truncar(A.listar_varios(lg, ruta))
         return A.listar(lg, ruta)
     except (RutaFueraDeRaiz, FileNotFoundError) as e:
         return f"error: {e}"
@@ -519,6 +629,41 @@ def copiar(origen: str = "", destino: str = "", origen_ruta: str = "",
     try:
         return CP.copiar(_cfg, origen_lugar, origen_ruta, destino_lugar, destino_ruta)
     except (RutaFueraDeRaiz, FileNotFoundError, T.TransporteError) as e:
+        return f"error: {e}"
+
+
+@mcp.tool()
+def sincronizar(origen: str, destino: str, excluir: str = "",
+                borrar: bool = True, seco: bool = False,
+                confirmado: bool = False) -> str:
+    """
+    Sincroniza un ÁRBOL entre dos rutas del MISMO lugar unix (rsync -a): el
+    patrón real de un despliegue web, repo -> webroot con varios excludes.
+    `desplegar` cubre UN archivo; esto cubre el árbol.
+
+    origen/destino en forma compacta `lugar:ruta` (o rutas del mismo lugar).
+    Al origen se le fuerza la barra final, así que siempre se sincroniza el
+    CONTENIDO del directorio — la variante sin barra, que mete el directorio
+    adentro del destino, casi nunca es la buscada y el error se descubre tarde.
+    'excluir': patrones separados por espacios (ej. ".git node_modules
+    images/uploads").
+
+    EL BORRADO NO CORRE A CIEGAS. Con borrar=True (por defecto, el --delete) y
+    sin confirmado=True, se hace un ENSAYO y se devuelve la lista EXACTA de lo
+    que se borraría en el destino: la decisión se toma mirando los archivos, no
+    releyendo el comando. Recién con confirmado=True se ejecuta. seco=True
+    fuerza el ensayo aunque haya confirmación; borrar=False sincroniza sin
+    borrar nada.
+    """
+    if _cfg.error_config:
+        return _aviso_config()
+    patrones = [p for p in (excluir or "").split() if p]
+    try:
+        return CP.sincronizar(_cfg, origen, destino, patrones, borrar, seco,
+                              confirmado)
+    except DestinoDesconocido as e:
+        return f"DESTINO DESCONOCIDO: {e}"
+    except (RutaFueraDeRaiz, T.TransporteError) as e:
         return f"error: {e}"
 
 

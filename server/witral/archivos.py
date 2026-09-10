@@ -141,6 +141,145 @@ def subir_b64(lugar: Lugar, ruta: str, contenido_b64: str,
     return f"{ruta}: {modo} en {lugar.nombre}, ahora {len(data)} bytes."
 
 
+# --- Esquema: el índice del archivo antes de leerlo -------------------------
+
+# Qué cuenta como "encabezado" según la extensión. Lo primero que se hace frente
+# a un archivo de miles de líneas no es leer un rango: es mirar el índice.
+_ESQUEMA = {
+    ".md":   r"^\s{0,3}#{1,6}\s+\S",
+    ".markdown": r"^\s{0,3}#{1,6}\s+\S",
+    ".py":   r"^\s*(?:async\s+)?(?:def|class)\s+\w+",
+    ".js":   r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?"
+             r"(?:function\s+\w+|class\s+\w+|const\s+\w+\s*=\s*(?:async\s*)?\()",
+    ".jsx":  r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?"
+             r"(?:function\s+\w+|class\s+\w+|const\s+\w+\s*=\s*(?:async\s*)?\()",
+    ".ts":   r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?"
+             r"(?:function\s+\w+|class\s+\w+|interface\s+\w+|type\s+\w+\s*=|"
+             r"const\s+\w+\s*=\s*(?:async\s*)?\()",
+    ".tsx":  r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?"
+             r"(?:function\s+\w+|class\s+\w+|interface\s+\w+|type\s+\w+\s*=|"
+             r"const\s+\w+\s*=\s*(?:async\s*)?\()",
+    ".php":  r"^\s*(?:abstract\s+|final\s+)?(?:public\s+|private\s+|protected\s+)?"
+             r"(?:static\s+)?(?:function|class|interface|trait)\s+\w+",
+    ".kt":   r"^\s*(?:@\w+\s+)*(?:public\s+|private\s+|internal\s+|open\s+|"
+             r"abstract\s+|override\s+|suspend\s+|data\s+)*"
+             r"(?:fun|class|object|interface)\s+\w+",
+    ".java": r"^\s*(?:@\w+\s+)*(?:public\s+|private\s+|protected\s+|static\s+|"
+             r"final\s+|abstract\s+)*(?:class|interface|enum|record|void|\w+)\s+"
+             r"\w+\s*\(",
+    ".sql":  r"^\s*(?:CREATE|ALTER|DROP)\s+(?:OR\s+REPLACE\s+)?"
+             r"(?:TABLE|VIEW|FUNCTION|PROCEDURE|INDEX|TRIGGER)",
+    ".sh":   r"^\s*(?:function\s+)?\w+\s*\(\s*\)\s*\{",
+    ".rb":   r"^\s*(?:def|class|module)\s+\w+",
+}
+
+
+def esquema(lugar: Lugar, ruta: str, maximo: int = 300) -> str:
+    """
+    ÍNDICE del archivo: encabezados de un .md, o firmas (def/class/function/fun)
+    de un archivo de código, con su número de línea.
+
+    Es el primer paso natural frente a un archivo largo —antes se resolvía con
+    un `grep -n '^#'` por `run`— y lo que dice dónde pedir después el rango.
+    """
+    import os as _os
+    import re as _re
+    ext = _os.path.splitext(ruta)[1].lower()
+    patron = _ESQUEMA.get(ext)
+    texto = _decodificar(_leer_bytes(lugar, ruta))
+    lineas = texto.splitlines()
+    total = len(lineas)
+    if not patron:
+        # Sin perfil: los encabezados estilo markdown son la convención más
+        # común en texto plano; si no hay ninguno, se dice con todas las letras.
+        patron = r"^\s{0,3}#{1,6}\s+\S"
+    rx = _re.compile(patron, _re.IGNORECASE if ext == ".sql" else 0)
+    encontrados = [(i + 1, l.rstrip())
+                   for i, l in enumerate(lineas) if rx.match(l)]
+    if not encontrados:
+        return (f"{ruta}: {total} líneas, sin encabezados reconocibles para "
+                f"'{ext or 'sin extensión'}'. Mirar con leer(desde, hasta), "
+                f"cola=N, o buscar_contenido.")
+    ancho = len(str(total))
+    filas = [f"{str(n).rjust(ancho)}: {t[:140]}" for n, t in encontrados[:maximo]]
+    cola = (f"\n... y {len(encontrados) - maximo} entradas más"
+            if len(encontrados) > maximo else "")
+    return (f"{ruta}: {total} líneas, {len(encontrados)} entradas de esquema.\n"
+            + "\n".join(filas) + cola +
+            "\n(Para el contenido: leer con desde/hasta sobre el rango que "
+            "interese.)")
+
+
+# --- Lectura de VARIOS archivos en una sola ida y vuelta ---------------------
+
+def _partir_rutas(rutas: str) -> list[str]:
+    """Acepta las rutas separadas por saltos de línea, comas o espacios."""
+    import re as _re
+    crudo = (rutas or "").replace(",", " ").replace("\n", " ")
+    # Una ruta CON espacios se pasa entre comillas dobles; el resto se parte por
+    # espacios. Así "C:\Mis Documentos\a.txt" sobrevive y `a.py b.py` funciona.
+    return [q or s for q, s in _re.findall(r'"([^"]+)"|(\S+)', crudo)]
+
+
+def leer_varios(lugar: Lugar, rutas: str, max_chars: int = 20000) -> str:
+    """
+    Devuelve el contenido de VARIOS archivos en UNA sola llamada.
+
+    Razón de ser: con archivos remotos cada ida y vuelta cuesta, y una tool que
+    hace exactamente una cosa por llamada empuja a encadenar seis comandos con
+    `&&` por `run` —la escotilla sin tipar y con confirmación— solo para ahorrar
+    viajes. El incentivo quedaba al revés: lo barato era lo inseguro. En remoto
+    esto se resuelve con UN comando que concatena todo con delimitadores.
+    """
+    archivos = _partir_rutas(rutas)
+    if not archivos:
+        return "error: no se indicó ninguna ruta."
+    if lugar.es_local:
+        bloques = []
+        for ruta in archivos:
+            try:
+                texto = _decodificar(_leer_bytes(lugar, ruta))
+            except FileNotFoundError:
+                bloques.append(f"===== {ruta} =====\n(no existe)")
+                continue
+            except OSError as e:
+                bloques.append(f"===== {ruta} =====\n(error: {e})")
+                continue
+            bloques.append(f"===== {ruta} =====\n" + _acotar(texto, max_chars))
+        return "\n\n".join(bloques)
+    # Remoto: un solo comando para todos los archivos.
+    lista = " ".join(T.comillas(a) for a in archivos)
+    linea = (f"for f in {lista}; do echo \"===== $f =====\"; "
+             f"if [ -f \"$f\" ]; then cat \"$f\"; else echo '(no existe)'; fi; "
+             f"echo; done")
+    r = T.ejecutar(lugar, linea, timeout=60)
+    if r.codigo != 0 and not r.salida:
+        return f"error: {r.error.strip()}"
+    return _acotar(r.salida, max_chars * max(1, len(archivos)))
+
+
+def _acotar(texto: str, limite: int) -> str:
+    if limite <= 0 or len(texto) <= limite:
+        return texto
+    return (texto[:limite] +
+            f"\n...[truncado: {limite} de {len(texto)} chars; "
+            f"para el resto, leer ese archivo con desde/hasta o cola]")
+
+
+def listar_varios(lugar: Lugar, rutas: str) -> str:
+    """Contenido de VARIOS directorios en una sola ida y vuelta."""
+    dirs = _partir_rutas(rutas)
+    if not dirs:
+        return "error: no se indicó ninguna ruta."
+    if lugar.es_local:
+        return "\n\n".join(f"===== {d} =====\n{listar(lugar, d)}" for d in dirs)
+    lista = " ".join(T.comillas(d) for d in dirs)
+    linea = (f"for d in {lista}; do echo \"===== $d =====\"; "
+             f"ls -la \"$d\" 2>&1 | tail -n +2; echo; done")
+    r = T.ejecutar(lugar, linea, timeout=60)
+    return r.salida if (r.salida or r.codigo == 0) else f"error: {r.error.strip()}"
+
+
 # --- Escritura simple -------------------------------------------------------
 
 def escribir(lugar: Lugar, ruta: str, contenido: str, eol: str = "auto") -> str:

@@ -253,6 +253,72 @@ NATIVOS: dict[str, Verificador] = {
 }
 
 
+# Binarios alternativos por verificador: en un servidor unix `python` suele ser
+# `python3`, y `node`/`nodejs` cambian según la distribución.
+_ALTERNATIVAS = {
+    "python": ("python3", "python"),
+    "node": ("node", "nodejs"),
+}
+
+
+def _candidatos(binario: str) -> tuple[str, ...]:
+    return _ALTERNATIVAS.get(binario, (binario,))
+
+
+def correr_nativo_remoto(lugar, ext: str, ruta: str):
+    """
+    Capa nativa EN EL LUGAR REMOTO: corre el verificador del lenguaje por SSH,
+    sobre el archivo que ya vive allá.
+
+    Existe porque la capa universal (balance de delimitadores) es la menos útil
+    de las dos, y los binarios (php, node, tsc) suelen estar instalados
+    justamente en el servidor, no en la máquina de escritorio. Antes, en remoto,
+    la verificación se degradaba a lo mínimo precisamente donde había con qué
+    hacerla bien.
+
+    Devuelve (ok, salida), o None si no hay verificador para esa extensión o
+    ninguno de sus binarios está instalado en el lugar.
+    """
+    from . import transporte as T
+    v = NATIVOS.get(ext)
+    if not v:
+        return None
+    binario = None
+    for cand in _candidatos(v.binario):
+        r = T.ejecutar(lugar, ["command", "-v", cand], timeout=20)
+        if r.codigo == 0 and r.salida.strip():
+            binario = cand
+            break
+    if binario is None:
+        return None
+    cmd = list(v.construir_cmd(ruta))
+    cmd[0] = binario
+    r = T.ejecutar(lugar, cmd, entrada="", timeout=60)
+    salida = (r.salida + "\n" + r.error).strip()
+    return (r.codigo == 0, f"[{binario} en {lugar.nombre}] {salida}".strip())
+
+
+def tsc_proyecto(lugar, carpeta: str):
+    """
+    Chequeo de tipos de un proyecto TypeScript: `tsc --noEmit` sobre la carpeta
+    que tiene el tsconfig.json.
+
+    Un archivo .ts suelto no se puede verificar bien —sin el resto del proyecto,
+    cada import propio sale como "cannot find module"—, así que el chequeo útil
+    es de PROYECTO. Y es el que tapa el agujero de un `npm run build` que
+    devuelve 0 con errores de tipos adentro: `tsc --noEmit` sí devuelve distinto
+    de 0. Devuelve (ok, salida) o None si no hay tsc disponible.
+    """
+    from . import transporte as T
+    r = T.ejecutar(lugar, ["command", "-v", "tsc"], timeout=20)
+    prefijo = ["tsc"] if (r.codigo == 0 and r.salida.strip()) else ["npx", "--no-install", "tsc"]
+    r = T.ejecutar(lugar, prefijo + ["--noEmit", "-p", carpeta], timeout=180)
+    salida = (r.salida + "\n" + r.error).strip()
+    if "not found" in salida.lower() and "npx" in " ".join(prefijo):
+        return None
+    return (r.codigo == 0, salida)
+
+
 def verificador_disponible(ext: str) -> str | None:
     """Nombre del binario nativo para esa extensión si está en el PATH, si no None."""
     v = NATIVOS.get(ext)

@@ -7,6 +7,58 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 17 — sincronizar árboles, verificar en el servidor, y arreglar el incentivo
+
+Feedback de una sesión de sitio web. Cinco puntos.
+
+**Añadido**
+- `sincronizar(origen, destino, excluir, borrar, seco, confirmado)` — rsync -a
+  entre dos rutas del mismo lugar unix. Faltaba sincronizar un ÁRBOL:
+  `desplegar` cubre un archivo, pero la operación repetida de un sitio es
+  repo → webroot con varios excludes, y esa se escribía a mano por `run` cada
+  vez. **El `--delete` no se ejecuta a ciegas**: sin `confirmado=True` se corre
+  un ensayo y vuelve la lista exacta de lo que se borraría en el destino, para
+  decidir mirando los archivos y no releyendo el comando — que es donde un
+  exclude mal tipeado se lleva `images/uploads/`. `seco=True` fuerza el ensayo;
+  `borrar=False` sincroniza sin borrar. Al origen se le fuerza la barra final.
+- `verificar_tipos(proyecto, donde)` — `tsc --noEmit` sobre la carpeta con el
+  tsconfig. Tapa un agujero concreto: un `npm run build` puede devolver 0 con
+  errores de TypeScript adentro, así que "el build pasó" no significa "compila".
+  Corre con el tsconfig del proyecto, así que no tiene los falsos positivos de
+  verificar un `.ts` suelto.
+- `leer_varios(archivos, ...)` y `listar` con varias rutas — el contenido de N
+  archivos, o N directorios, en UNA ida y vuelta.
+- `leer(..., esquema=True)` — el índice del archivo en vez de su contenido:
+  encabezados de un `.md`, firmas (def/class/function/fun/interface/type) de un
+  archivo de código, con número de línea. Es lo primero que se quiere ante un
+  archivo de miles de líneas, y lo que dice qué rango pedir después.
+
+**Cambiado**
+- La capa NATIVA de `verificar_sintaxis` corre también en lugares REMOTOS, por
+  SSH y sobre el archivo que ya vive allá. Antes en remoto quedaba solo la capa
+  universal (balance de delimitadores), que es la menos útil de las dos, y
+  justamente el servidor es donde suelen estar php, node y tsc. En unix se
+  prueba `python3` antes que `python`, y `nodejs` como alternativa de `node`.
+- `editar_literal` acepta `buscar`/`reemplazar` como alias de `viejo`/`nuevo`, y
+  si falta el texto responde en castellano en vez de volcar la validación cruda
+  de pydantic. Mismo criterio que `buscar_nombre` con `proyecto`/`objetivo`: los
+  nombres que uno prueba primero no deberían costar una llamada.
+
+**Nota de diseño (el punto 3 del feedback)**
+El motivo por el que casi todo terminaba haciéndose con `run confirmado=true` no
+era el gusto sino la mecánica: cada tool tipada hacía una cosa por llamada y
+`run` encadena seis con `&&`. Con archivos remotos, donde cada ida y vuelta
+cuesta, el incentivo quedaba al revés — lo barato era lo inseguro. `leer_varios`
+y `listar` multi-ruta existen para invertirlo.
+
+**Pruebas**
+- `server/pruebas_ronda17.py`: el ensayo de `sincronizar` (que lleve --dry-run y
+  --delete, que liste los borrados, que `seco` gane a `confirmado`, que
+  `borrar=False` no pida confirmación, y los rechazos entre lugares distintos y
+  en Windows), esquema de md/py/ts y el caso sin encabezados, `leer_varios` con
+  archivo faltante, el separador de rutas con comillas, y la capa nativa remota
+  con binario presente y ausente.
+
 ### Ronda 16 — esperar la línea, no la muerte del proceso
 
 Feedback de un día entero de uso, ordenado por lo que costó tiempo.

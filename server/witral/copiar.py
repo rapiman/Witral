@@ -36,6 +36,92 @@ def partir_lugar_ruta(spec: str, nombres, default_lugar: str = "local"):
     return default_lugar, spec
 
 
+def _rsync_args(origen: str, destino: str, excluir: list[str],
+                borrar: bool, seco: bool) -> list[str]:
+    """
+    Arma el rsync. La barra final en el ORIGEN es la diferencia entre copiar el
+    contenido del directorio y copiar el directorio adentro del destino: se
+    fuerza siempre, porque la variante sin barra casi nunca es la que se quiere
+    y el error se descubre tarde.
+    """
+    o = origen if origen.endswith("/") else origen + "/"
+    args = ["rsync", "-a", "--itemize-changes"]
+    if borrar:
+        args.append("--delete")
+    if seco:
+        args.append("--dry-run")
+    for patron in excluir:
+        patron = patron.strip()
+        if patron:
+            args += ["--exclude", patron]
+    args += [o, destino]
+    return args
+
+
+def _lineas_borrado(salida: str) -> list[str]:
+    """Las líneas de rsync que corresponden a un BORRADO en el destino."""
+    return [l for l in salida.splitlines() if l.startswith("*deleting")]
+
+
+def sincronizar(cfg: Config, origen: str, destino: str, excluir: list[str],
+                borrar: bool, seco: bool, confirmado: bool) -> str:
+    """
+    Sincroniza un ÁRBOL entre dos rutas del MISMO lugar unix, con rsync -a.
+
+    Por qué existe: `desplegar` cubre un archivo, pero la operación repetida de
+    un sitio es sincronizar el repo al webroot con varios excludes, y esa se
+    escribía a mano por `run` en cada sesión. Es justo la clase de comando donde
+    un exclude mal tipeado, sumado a --delete, borra una carpeta de uploads sin
+    preguntar.
+
+    Por eso el borrado NO se ejecuta a ciegas: con borrar=True y sin
+    confirmado=True se corre un ENSAYO (--dry-run) y se devuelve la lista exacta
+    de lo que se borraría, para decidir sobre hechos y no sobre la lectura del
+    comando. seco=True fuerza el ensayo aunque haya confirmación.
+    """
+    o_lugar, o_ruta = partir_lugar_ruta(origen, cfg.nombres)
+    d_lugar, d_ruta = partir_lugar_ruta(destino, cfg.nombres)
+    o = cfg.resolver(o_lugar)
+    d = cfg.resolver(d_lugar)
+    if o.nombre != d.nombre:
+        return (f"sincronizar opera DENTRO de un mismo lugar (rsync local a esa "
+                f"máquina); acá vienen '{o.nombre}' y '{d.nombre}'. Para mover "
+                f"entre lugares está `copiar` (SFTP, un archivo).")
+    if o.es_windows:
+        return (f"'{o.nombre}' es Windows: no hay rsync. Para un árbol en "
+                f"Windows, robocopy por `run` (y su /MIR es el equivalente de "
+                f"--delete: mismas precauciones).")
+
+    ensayo = seco or (borrar and not confirmado)
+    args = _rsync_args(o_ruta, d_ruta, excluir, borrar, ensayo)
+    r = T.ejecutar(o, args, timeout=180)
+    if r.codigo != 0:
+        return (f"error de rsync (código {r.codigo}) en {o.nombre}:\n"
+                f"{(r.error or r.salida).strip()}")
+
+    borrados = _lineas_borrado(r.salida)
+    cambios = [l for l in r.salida.splitlines() if l and l not in borrados]
+    resumen = (f"{len(cambios)} archivo(s) a copiar/actualizar, "
+               f"{len(borrados)} a borrar en el destino")
+
+    if ensayo and borrar and not confirmado and not seco:
+        detalle = "\n".join(f"  {l}" for l in borrados[:100]) or "  (ninguno)"
+        if len(borrados) > 100:
+            detalle += f"\n  ... y {len(borrados) - 100} más"
+        return (f"ENSAYO (nada se tocó todavía). {resumen}.\n"
+                f"SE BORRARÍA en {d_ruta}:\n{detalle}\n\n"
+                f"Revisar esa lista: si aparece algo que no debería (uploads, "
+                f"media, config del servidor), falta un patrón en 'excluir'. "
+                f"Para ejecutar de verdad, reintentar con confirmado=True.")
+
+    cabecera = "ENSAYO (nada se tocó)" if ensayo else "Sincronizado"
+    detalle = "\n".join(f"  {l}" for l in r.salida.splitlines()[:200])
+    if len(r.salida.splitlines()) > 200:
+        detalle += f"\n  ... ({len(r.salida.splitlines())} líneas en total)"
+    return (f"{cabecera}: {o_ruta} -> {d_ruta} en {o.nombre}. {resumen}.\n"
+            f"{detalle}")
+
+
 def copiar(cfg: Config, origen_lugar: str | None, origen_ruta: str,
            destino_lugar: str | None, destino_ruta: str) -> str:
     o = cfg.resolver(origen_lugar)

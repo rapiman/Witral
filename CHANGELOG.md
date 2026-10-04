@@ -7,6 +7,43 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 18 — trabajos sin acarrear ids, esperas sin repetir, y el SQL por su camino
+
+Feedback de una sesión conducida por un agente: las fricciones de un consumidor
+que no puede mirar la pantalla ni recordar estado entre llamadas.
+
+**Añadido**
+- `id="ultimo"` en `run_status` y `run_esperar` (en esta, valor por defecto):
+  el trabajo más reciente del lugar, de `run_async` o de `gradle_build`. La
+  respuesta dice a cuál resolvió. La raíz del síntoma ("esperar un trabajo que
+  no existía") no era que `run_async` no devolviera el id, sino que no había
+  forma de decir "el último", así que el id había que acarrearlo y un agente que
+  no lo acarreó lo inventaba.
+- Delta de líneas: `desde_out`/`desde_err` en `run_status` y `run_esperar` traen
+  solo lo nuevo de cada log. Toda respuesta cierra con un pie `[delta: ...]` con
+  los valores para la próxima llamada. Nueve esperas ya no traen nueve veces el
+  mismo tail. Una última línea a medio escribir se muestra pero no se cuenta.
+- `run_async(..., al_terminar="<comando>")`: el aviso de fin que existe de
+  verdad, porque lo emite la máquina que terminó (Witral no puede empujar nada
+  al cliente MCP). Corre tras registrar el código, también si el trabajo falló o
+  lo mató `run_matar`; recibe `WITRAL_JOB` y `WITRAL_CODIGO` (o `matado`); salida
+  a `al_terminar.log`; no altera el código del trabajo; tope de 60s.
+- `run` se niega ANTES de ejecutar —aunque venga `confirmado=True`— cuando el
+  comando invoca psql/sqlcmd/sqlite3/mysql con SQL en la línea, y nombra la tool
+  tipada (`sql`, `psql_aplicar`, `sqlite`). Para pasar igual: `sql_inline=True`.
+  Tenía que ir antes de la confirmación: quien llama suele pasar
+  `confirmado=True` de entrada, y un aviso que eso saltea no se ve.
+
+**Cambiado**
+- Un id inexistente en `run_status`/`run_esperar` responde con la lista de
+  trabajos en la misma respuesta, en vez de mandar a hacer otra llamada.
+- La regla BEGIN … ROLLBACK para fixtures de prueba queda en la descripción de
+  `sql` y en el recetario: un error de comillas había dejado datos de prueba sin
+  restaurar porque la restauración dependía de que un segundo comando corriera.
+
+Pruebas: `server/pruebas_ronda18.py` (las de `al_terminar` lanzan procesos
+reales en un temporal: código, `run_matar` y tope).
+
 ### Ronda 17 — sincronizar árboles, verificar en el servidor, y arreglar el incentivo
 
 Feedback de una sesión de sitio web. Cinco puntos.

@@ -61,11 +61,17 @@ Sin tool dedicada: combinar acciones de archivo, sin cargar el archivo entero.
 
 `run` no sirve: el cliente MCP corta las llamadas largas. Usar el buzón asíncrono:
 
-1. `run_async(comando, donde, confirmado=True)` → devuelve un id al instante.
-2. `run_esperar(id, donde)` — bloquea hasta que termine y devuelve el estado. Se topa
-   en ~40s por llamada; si sigue corriendo, vuelve a llamarlo. (O `run_status(id)`
-   para un vistazo puntual.)
-3. `run_matar(id, donde, confirmado=True)` si hay que abortar.
+1. `run_async(comando, donde, confirmado=True)` → devuelve un id al instante. Si se
+   necesita un aviso real de fin, `al_terminar="<comando>"` (lo emite la máquina que
+   terminó; Witral no puede avisar solo).
+2. Lo natural es devolver el control y seguir con otra cosa; después,
+   `run_status(id)` para un vistazo sin bloquear. El id no hace falta acarrearlo:
+   `id="ultimo"` resuelve al trabajo más reciente del lugar.
+3. Si solo falta el resultado, `run_esperar(id, donde)`: bloquea hasta que termine y
+   se topa en ~40s por llamada. Para no encadenar esperas: `hasta_patron` si se sabe
+   qué línea se espera; si no, re-llamar con los `desde_out`/`desde_err` del pie
+   `[delta]` para recibir solo lo nuevo.
+4. `run_matar(id, donde, confirmado=True)` si hay que abortar.
 
 La salida queda en `.witral/jobs/<id>/` del lugar y sobrevive a reinicios: un trabajo
 lanzado en una conversación se puede consultar desde otra.

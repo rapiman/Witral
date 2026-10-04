@@ -125,6 +125,10 @@ Elegir: texto corto y único a la vista → `editar_literal`. Bloque por rango �
   y lo manda por stdin al psql de la BASE: sirve para bases detrás de túnel cuyo psql
   no ve el filesystem local (ej. `origen="local"`, `donde="dev_porafuera"`).
   Siempre pide `confirmado=True`.
+- REGLA: datos de prueba van envueltos en `BEGIN` ... `ROLLBACK` (en sqlserver
+  `BEGIN TRANSACTION`) en UNA sola llamada: cargar, consultar y deshacer juntos. Así
+  se deshacen pase lo que pase, sin depender de que una segunda llamada de
+  restauración llegue a correr.
 
 ---
 
@@ -153,14 +157,23 @@ Sobre repos dentro de un lugar; soporta `donde`.
   lugar no sensible (allowlist: git status/log/diff/show, ls, dir, cat, findstr,
   grep, head, tail..., encadenables con `&&`/`;`, sin redirecciones/pipes/background).
   cwd = raíz del lugar. SOLO para comandos CORTOS (<~45s): el cliente MCP corta las
-  llamadas largas.
-- `run_async(comando, donde, confirmado)` — lanza un comando LARGO detached y
-  devuelve un id. Estado en `.witral/jobs/<id>/`, sobrevive a reinicios.
-- `run_status(id, donde, lineas)` — corriendo/terminado + código + últimas líneas
-  (sin id: lista los trabajos). Lectura libre.
-- `run_esperar(id, hasta_segundos, lineas, donde)` — BLOQUEA del lado de Witral
-  hasta que el trabajo termine y devuelve su estado; reemplaza el polling con
-  `sleep`. Se topa en ~40s por llamada (corte del cliente) y pide re-llamar si sigue.
+  llamadas largas. Con SQL en la línea (`psql -c`, `sqlcmd -Q`, `sqlite3 x.db "..."`)
+  se niega ANTES de ejecutar, aunque venga `confirmado=True`, y nombra `sql` /
+  `psql_aplicar` / `sqlite`; para pasar igual, `sql_inline=True`.
+- `run_async(comando, donde, confirmado, al_terminar)` — lanza un comando LARGO
+  detached y devuelve un id. Estado en `.witral/jobs/<id>/`, sobrevive a reinicios.
+  `al_terminar`: comando que corre la máquina del trabajo al cerrarlo (centinela,
+  webhook), también si falló o lo mató `run_matar`; recibe `WITRAL_JOB` y
+  `WITRAL_CODIGO`; salida a `al_terminar.log`; tope 60s; no cambia el código.
+- `run_status(id, donde, lineas, desde_out, desde_err)` — corriendo/terminado +
+  código + últimas líneas (sin id: lista los trabajos). `id="ultimo"`: el más
+  reciente del lugar. Un id inexistente responde con la lista. Lectura libre.
+- `run_esperar(id, hasta_segundos, lineas, donde, hasta_patron, desde_out,
+  desde_err)` — BLOQUEA del lado de Witral hasta que el trabajo termine (o hasta
+  que una línea matchee `hasta_patron`) y devuelve su estado. Se topa en ~40s por
+  llamada (corte del cliente) y pide re-llamar si sigue. `id` por defecto
+  `"ultimo"`. Delta: `desde_out`/`desde_err` traen solo lo nuevo; cada respuesta
+  cierra con un pie `[delta]` con los valores para la próxima llamada.
 - `run_matar(id, donde, confirmado)` — mata el árbol completo del trabajo.
 - `procesos(donde, filtro)` — lista procesos (`tasklist`/`ps`). Solo lectura.
 - `matar_proceso(patron, donde, confirmado)` — `taskkill`/`pkill`.

@@ -44,6 +44,11 @@ se ejecuta el cliente `psql` nativo allá vía SSH, con todas sus característic
 meta-comandos `\dt`, `\d`, `\copy`, etc.). "Consultar la base de dev" es "correr psql en
 dev". Así, `db` queda disuelto como una acción más: *correr psql en un lugar*.
 
+Eso se hace con la acción tipada `sql` (el SQL viaja por stdin), nunca armando
+`psql -c "..."` a mano por `run`: ahí el SQL pelea con las comillas del shell, y `run`
+se niega. Datos de prueba: `BEGIN ... ROLLBACK` en una sola llamada, para que se
+deshagan pase lo que pase.
+
 Postgres es el motor de hoy. Si aparece otro, se incorpora como "correr el cliente nativo
 de ese motor en un lugar" (mismo patrón), en su individualidad.
 

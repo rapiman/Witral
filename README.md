@@ -82,14 +82,14 @@ Dos modos de edición: `editar_literal` (texto exacto y único, inmune a CRLF) y
 `desplegar` — despliegue en una pasada: copiar → reiniciar servicio → esperar → prueba de humo HTTP.
 
 **Ejecución y sistema** (eje `donde`, según el SO del lugar)
-`run` — comando arbitrario en un lugar (local o remoto); escotilla de propósito general. Pide confirmación salvo comandos de solo lectura (allowlist: `git status/log/diff`, `ls`, `dir`, `findstr`, ...) en lugares no sensibles.
-`run_async` / `run_status` / `run_esperar` / `run_matar` — **buzón asíncrono**: lanza un comando LARGO en segundo plano y devuelve un id al instante (el cliente MCP corta las llamadas de más de ~45s); `run_status` consulta por id, `run_esperar` bloquea del lado del server hasta que termina, `run_matar` termina el árbol de procesos. El estado vive en disco y sobrevive a reinicios.
+`run` — comando arbitrario en un lugar (local o remoto); escotilla de propósito general. Pide confirmación salvo comandos de solo lectura (allowlist: `git status/log/diff`, `ls`, `dir`, `findstr`, ...) en lugares no sensibles. Si el comando trae SQL en la línea (`psql -c`, `sqlcmd -Q`, ...), se niega antes de ejecutar y nombra la tool tipada (`sql_inline=True` para pasar igual).
+`run_async` / `run_status` / `run_esperar` / `run_matar` — **buzón asíncrono**: lanza un comando LARGO en segundo plano y devuelve un id al instante (el cliente MCP corta las llamadas de más de ~45s); `run_status` consulta por id (o `id="ultimo"`), `run_esperar` bloquea del lado del server hasta que termina o hasta que una línea matchea `hasta_patron`, `run_matar` termina el árbol de procesos. `desde_out`/`desde_err` traen solo las líneas nuevas de cada log. `run_async(..., al_terminar=...)` hace que la máquina del trabajo emita un aviso al cerrarlo (centinela, webhook). El estado vive en disco y sobrevive a reinicios.
 `procesos` — lista procesos (`tasklist`/`ps` según SO).
 `matar_proceso` — mata por nombre/patrón (`taskkill`/`pkill`).
 `servicio` — status/start/stop/restart (`sc`/`systemctl`).
 
 **Base de datos**
-`psql` — consulta/sentencia sobre la base local de un lugar · `psql_aplicar` — aplica un `.sql` (migraciones).
+`sql` (alias histórico `psql`) — consulta/sentencia sobre la base de un lugar, con el cliente nativo del motor (psql o sqlcmd) y el SQL por stdin · `psql_aplicar` — aplica un `.sql` (migraciones). Datos de prueba: `BEGIN ... ROLLBACK` en una sola llamada.
 
 **Git**
 `git_status` · `git_log` · `git_diff` · `git_branch` · `git_show` · `git_pull` · `git_fetch` · `git_add` · `git_commit` · `git_push` · `git_publicar` (ciclo completo status→add→diff→commit→push en una pasada) · `git_reset_hard` · `git_clone` · `git_init` · `git_remote` (lista o agrega) · `git_identidad`

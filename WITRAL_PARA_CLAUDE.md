@@ -196,6 +196,26 @@ llamada. Si se quiere a mano: `git_status` -> `git_add` -> `git_diff` -> `git_co
   codigo + ultimas lineas de out/err (sin id: lista los trabajos del lugar; lectura
   libre). `run_matar(id, donde, confirmado)` — mata el arbol completo del trabajo.
   Estado en disco en `.witral/jobs/<id>/` del lugar; sobrevive a reinicios.
+- **`id="ultimo"` (ronda 18)** en `run_status` y `run_esperar` (en esta ultima es el valor por
+  defecto): resuelve al trabajo mas reciente del lugar —de `run_async` o de `gradle_build`,
+  termino o no— y la respuesta dice a cual (`[id="ultimo" -> <jid>]`). El id deja de tener que
+  acarrearse de memoria; un agente que no lo acarreo ya no lo inventa. Con dos trabajos en
+  vuelo, "ultimo" es el ultimo LANZADO: ahi conviene el id concreto. Un id inexistente ahora
+  responde con la lista de trabajos en la misma respuesta.
+- **Delta de lineas (ronda 18)**: `run_status`/`run_esperar` aceptan `desde_out` y
+  `desde_err` y entonces traen solo las lineas NUEVAS de cada log, no el mismo tail en cada
+  vuelta. Toda respuesta termina con un pie `[delta: ... desde_out=N, desde_err=M]` con los
+  valores para la proxima llamada. Una ultima linea a medio escribir se muestra pero no se
+  cuenta, asi la proxima llamada la trae entera.
+- **`run_async(..., al_terminar="<comando>")` (ronda 18)**: el aviso de fin que existe de
+  verdad. Witral NO puede empujar nada al cliente MCP (el tope de ~45s por llamada es del
+  cliente); lo que si se puede es que la MAQUINA que termino emita el aviso: escribir un
+  centinela, pegarle a un webhook, mandar un mensaje. Corre despues de registrar el codigo,
+  tambien si el trabajo fallo o lo mato `run_matar`; recibe `WITRAL_JOB` y `WITRAL_CODIGO`
+  (numero o `matado`) en el entorno (`%WITRAL_CODIGO%` en cmd, `$WITRAL_CODIGO` en sh); su
+  salida va a `al_terminar.log` del job, NO cambia el codigo del trabajo y tiene tope de 60s
+  (un webhook colgado no deja el trabajo como "corriendo": el codigo ya esta escrito). Mismo
+  cwd que el comando: la raiz del lugar.
 - **`run_esperar(id, ..., hasta_patron)` (ronda 16): esperar la LINEA, no la muerte del
   proceso.** `hasta_patron` es una regex; la espera vuelve en cuanto una linea de out.log o
   err.log matchea, y devuelve esa linea. Es lo que convierte una bateria larga en dos llamadas
@@ -480,6 +500,10 @@ app **debuggable** (en release no hay acceso).
 | Comando arbitrario (ultimo recurso)          | `run` (siempre confirmado)            |
 | Ver por que fallo un build                   | `gradle_errores(job_id)`              |
 | Esperar una LINEA concreta de un trabajo     | `run_esperar(id, hasta_patron="...")` |
+| Estado del ultimo trabajo, sin acarrear el id| `run_status(id="ultimo")`             |
+| Seguir un log sin repetir lo ya visto        | `run_esperar(desde_out=N, desde_err=M)` |
+| Aviso real cuando termina un trabajo         | `run_async(..., al_terminar="...")`   |
+| Datos de prueba que se deshacen solos        | `sql("BEGIN; ...; ROLLBACK;")`        |
 | Sincronizar repo -> webroot (con --delete)   | `sincronizar` (ensayo primero)        |
 | Ver el indice de un archivo largo            | `leer(archivo, esquema=True)`         |
 | Leer varios archivos remotos de una          | `leer_varios("a.php b.php")`          |
@@ -568,6 +592,12 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
   devolver el control y hacer otras cosas por mientras (mas ediciones, revisar logs,
   responder); recien al necesitar el resultado, `run_status(id)` (no bloquea). Reservar
   `run_esperar(id)` para cuando no queda otra tarea util y solo falta que termine.
+- Ronda 18: el id NO se inventa ni hace falta acarrearlo — `id="ultimo"`. Si hay que
+  encadenar esperas: primero `hasta_patron` (si se sabe que linea se espera), y si no,
+  `desde_out`/`desde_err` del pie `[delta]` para no recibir de nuevo lo ya visto.
+- NO SE PUEDE: que Witral avise solo al terminar (el tope es del cliente MCP y Witral no
+  puede empujar). ALTERNATIVA: `run_async(..., al_terminar="<comando>")` — el aviso lo
+  emite la maquina que termino (centinela, webhook, mensaje).
 - ATENCION en Windows: `timeout /t` NO sirve dentro de un job (no soporta stdin redirigido);
   para esperas usar `powershell -NoProfile -Command "Start-Sleep N"`.
 
@@ -618,6 +648,14 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
   `psql_aplicar(donde="dev_porafuera", origen="local", ruta_sql=..., confirmado=True)`.
 - Otra base del mismo lugar: parametro `base` (no tocar lugares.json).
 - NO usar psycopg boilerplate: `psql_aplicar` ya lee el archivo y lo manda por stdin.
+- NO SE PUEDE (ronda 18): SQL inline por `run` (`psql -c "..."`, `sqlcmd -Q "..."`,
+  `sqlite3 x.db "..."`). `run` se niega antes de ejecutar, aunque venga `confirmado=True`,
+  y nombra la tool tipada. Las comillas anidadas con SQL o JSON adentro son justo lo que el
+  stdin de `sql` evita. Escape para un cliente sin tool (mysql): `sql_inline=True`.
+- REGLA (ronda 18): datos de prueba van envueltos en `BEGIN` ... `ROLLBACK` (en sqlserver
+  `BEGIN TRANSACTION`) en UNA sola llamada a `sql`: cargar, consultar y deshacer juntos. Asi
+  se deshacen pase lo que pase. Motivo: un error de comillas dejo un fixture sin restaurar
+  porque la restauracion dependia de que un segundo comando llegara a correr.
 
 **Git.**
 - Ciclo normal: `git_publicar` (pipeline con diff visible; lista los untracked NUEVOS y
@@ -738,7 +776,26 @@ Reglas practicas destiladas del uso real. Leer antes de improvisar.
 
 ## 7. ESTADO Y PENDIENTES (para retomar desde otra conversacion)
 
-### Ultima sesion (2026-09-10, ronda 17: sesion de sitio web)
+### Ultima sesion (2026-10-04, ronda 18: sesion conducida por un agente)
+
+Fricciones de un consumidor que no puede mirar la pantalla ni recordar estado entre
+llamadas. Detalle en el CHANGELOG. Resumen:
+
+1. `id="ultimo"` en `run_status`/`run_esperar` y lista de trabajos ante un id inexistente.
+2. Delta `desde_out`/`desde_err` con pie `[delta]`; `run_async(..., al_terminar=...)`
+   (corre tambien al fallar o con `run_matar`, `WITRAL_CODIGO`, log aparte, tope 60s).
+3. `run` se niega ante SQL inline aunque venga `confirmado=True` (escape `sql_inline=True`);
+   regla BEGIN/ROLLBACK en `sql` y en el recetario.
+
+Validado con `server/pruebas_ronda18.py` (incluye procesos reales para `al_terminar` en
+Windows) y las rondas 14-17 en verde. Hecha en finoli, que estaba dos rondas atras: se trajo
+`origin/main` (5009707) antes de empezar.
+
+PENDIENTE: reinicio completo de Claude Desktop + conversacion nueva (firmas nuevas de
+`run`, `run_async`, `run_status`, `run_esperar`) y verificacion en vivo: un `run_async` con
+`al_terminar` en wedwed (el camino unix remoto solo tiene prueba de texto, no de ejecucion).
+
+### Sesion anterior (2026-09-10, ronda 17: sesion de sitio web)
 
 Cinco puntos. Validado con `server/pruebas_ronda17.py` (35 aserciones) y las rondas 14-16 en
 verde.

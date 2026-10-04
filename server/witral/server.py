@@ -16,6 +16,7 @@ gradle y búsqueda. (El número de tools cambia; verlo con tool_search, no aquí
 
 from __future__ import annotations
 
+import re as _re_mod
 import time as _time
 
 from mcp.server.fastmcp import FastMCP, Image
@@ -864,11 +865,56 @@ def _envolver_shell(lg, comando: str, shell: str) -> tuple[str, str]:
 
 _RUN_TOPE = 45  # s: tope propio, por debajo del corte del cliente MCP (~60s)
 
+# Cliente de base de datos invocado por la escotilla con el SQL en la línea.
+# Es el camino donde el SQL pelea con las comillas de cmd/PowerShell y donde no
+# hay topes ni veredicto; las tools tipadas lo mandan por stdin.
+_CLIENTE_SQL = _re_mod.compile(
+    r"(?i)(?:^|[\s\\/&|;(\"'])(psql|sqlcmd|sqlite3|mysql|mariadb)(?:\.exe)?(?=[\s\"']|$)")
+_SENTENCIA_SQL = _re_mod.compile(
+    r"(?i)\b(select|insert|update|delete|create|alter|drop|truncate|merge|"
+    r"grant|revoke)\b")
+_TOOL_SQL = {
+    "psql": "sql(donde, comando) — o psql_aplicar(donde, ruta_sql) para un .sql",
+    "sqlcmd": "sql(donde, comando) — o psql_aplicar(donde, ruta_sql) para un .sql",
+    "sqlite3": "sqlite(archivo, comando)",
+}
+
+
+def _sql_inline(comando: str) -> str:
+    """Nombre del cliente si 'comando' invoca un cliente de base con SQL en la
+    misma línea (no con -f/-i de un archivo); "" si no."""
+    m = _CLIENTE_SQL.search(comando)
+    if not m:
+        return ""
+    if not _SENTENCIA_SQL.search(comando[m.end():]):
+        return ""
+    return m.group(1).lower()
+
+
+def _aviso_sql_inline(cliente: str, comando: str) -> str:
+    tool = _TOOL_SQL.get(cliente)
+    camino = (f"Usar {tool}: el SQL viaja por stdin (sin pelear con las comillas "
+              f"del shell), con tope propio y un veredicto sobre si la sentencia "
+              f"quedó aplicada, deshecha o indeterminada."
+              if tool else
+              f"No hay tool tipada para {cliente}: si no hay alternativa, "
+              f"reintentar con sql_inline=True.")
+    return (
+        f"SQL INLINE por run: el comando invoca {cliente} con SQL en la línea.\n"
+        f"Comando: {comando}\n"
+        f"{camino}\n"
+        f"Si es un fixture de prueba, envolverlo en BEGIN ... ROLLBACK (BEGIN "
+        f"TRANSACTION en sqlserver) en UNA "
+        f"sola llamada a sql: se deshace pase lo que pase, sin depender de que "
+        f"un segundo comando de restauración llegue a correr.\n"
+        f"Para ejecutarlo igual por run: sql_inline=True (además de confirmado=True)."
+    )
+
 
 @mcp.tool()
 def run(comando: str, donde: str = "local", confirmado: bool = False,
         max_salida: int = 40000, shell: str = "auto",
-        segundos: int = _RUN_TOPE) -> str:
+        segundos: int = _RUN_TOPE, sql_inline: bool = False) -> str:
     """
     Ejecuta un comando arbitrario en un lugar (local o remoto) y devuelve la
     salida. SIEMPRE requiere confirmado=True: es una escotilla de propósito
@@ -896,10 +942,21 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
     por sintaxis o por comando no reconocido y el comando es de solo lectura,
     reintenta solo en PowerShell. "powershell" fuerza PowerShell; "cmd" fuerza
     cmd sin desvío. Con && o || nunca desvía (PowerShell 5.1 no los soporta).
+
+    SQL: si el comando invoca psql/sqlcmd/sqlite3/mysql con SQL EN LA LÍNEA,
+    run se niega ANTES de ejecutar —aunque venga confirmado=True— y nombra la
+    tool tipada: sql(donde, comando) manda el SQL por stdin (sin escapado),
+    psql_aplicar un .sql, sqlite un .db. Para pasar igual: sql_inline=True.
+    Un fixture de prueba va envuelto en BEGIN ... ROLLBACK en UNA llamada a sql.
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
+    # SQL inline: va ANTES de la confirmación porque el que llama suele pasar
+    # confirmado=True de entrada, y un aviso que confirmado saltea no se ve.
+    cliente = "" if sql_inline else _sql_inline(comando)
+    if cliente:
+        return _aviso_sql_inline(cliente, comando)
     # Comando de SOLO LECTURA en un lugar no sensible: no se pide confirmación
     # (allowlist en _es_solo_lectura). Todo lo demás sigue pidiéndola.
     if not confirmado and not (_es_solo_lectura(comando) and not lg.sensible):
@@ -947,7 +1004,7 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
 
 @mcp.tool()
 def run_async(comando: str, donde: str = "local", confirmado: bool = False,
-              shell: str = "auto") -> str:
+              shell: str = "auto", al_terminar: str = "") -> str:
     """
     Lanza un comando LARGO en segundo plano (detached) y devuelve un id al
     instante. Es la forma correcta de correr trabajos de minutos: el cliente
@@ -956,42 +1013,65 @@ def run_async(comando: str, donde: str = "local", confirmado: bool = False,
     run_matar(id). La salida queda en .witral/jobs/<id>/ del lugar (out.log,
     err.log, codigo) y sobrevive a reinicios. cwd = raíz del lugar.
     Como `run`, SIEMPRE requiere confirmado=True.
+
+    El id NO hay que acarrearlo de memoria: run_status/run_esperar aceptan
+    id="ultimo" (el trabajo más reciente del lugar).
+
+    'al_terminar': comando que la MÁQUINA DEL TRABAJO corre al cerrarlo
+    (escribir un centinela, pegarle a un webhook, mandar un mensaje). Es el
+    único aviso de fin que existe: Witral no puede empujar nada al cliente MCP.
+    Corre después de registrar el código, también si el trabajo falló o lo mató
+    run_matar; recibe WITRAL_JOB y WITRAL_CODIGO (número o 'matado') en el
+    entorno (%WITRAL_CODIGO% en cmd, $WITRAL_CODIGO en sh); su salida va a
+    al_terminar.log, NO cambia el código del trabajo y tiene tope de 60s.
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     if not confirmado:
         extra = " (LUGAR SENSIBLE)" if lg.sensible else ""
+        hook = f"\n  al_terminar: {al_terminar}" if al_terminar else ""
         return (
             f"CONFIRMACIÓN REQUERIDA{extra}: run_async ejecutará en segundo plano "
-            f"en '{donde}':\n  {comando}\n"
+            f"en '{donde}':\n  {comando}{hook}\n"
             f"Mostrar el comando al usuario y reintentar con confirmado=True."
         )
     # Se anota el comando ORIGINAL, antes de envolverlo en el shell: es lo que
     # se pidió, y es lo que sirve para leer la bitácora después.
-    BIT.anotar(_raiz_local(), donde, "run_async", comando, confirmado, "lanzado", "")
+    BIT.anotar(_raiz_local(), donde, "run_async",
+               comando + (f"  [al_terminar: {al_terminar}]" if al_terminar else ""),
+               confirmado, "lanzado", "")
     try:
         comando, nota = _envolver_shell(lg, comando, shell)
+        if al_terminar:
+            al_terminar, nota_hook = _envolver_shell(lg, al_terminar, shell)
+            if nota_hook:
+                nota = (nota + "\n" if nota else "") + "al_terminar: " + nota_hook
     except ValueError as e:
         return f"error: {e}"
     try:
-        jid = TR.lanzar(lg, comando)
+        jid = TR.lanzar(lg, comando, al_terminar)
         return ((nota + "\n" if nota else "") +
                 f"Trabajo lanzado: id {jid} en {donde}.\n"
-                f"Consultar con run_status(id=\"{jid}\", donde=\"{donde}\"); "
-                f"matar con run_matar si hace falta.")
+                f"Consultar con run_status(id=\"{jid}\", donde=\"{donde}\") "
+                f"(o id=\"ultimo\"); matar con run_matar si hace falta.")
     except T.TransporteError as e:
         return f"error: {e}"
 
 
 @mcp.tool()
 def run_status(id: str = "", pid: str = "", donde: str = "local",
-               lineas: int = 40) -> str:
+               lineas: int = 40, desde_out: int = 0, desde_err: int = 0) -> str:
     """
     Estado de un trabajo lanzado con run_async: corriendo/terminado, código de
     salida y las últimas 'lineas' de out.log y err.log. Sin id, lista los
-    últimos trabajos del lugar. Con 'pid' (en vez de id), dice si ese proceso
-    sigue vivo — para procesos huérfanos cuyo registro de trabajo se perdió.
+    últimos trabajos del lugar. id="ultimo": el trabajo más reciente del lugar
+    (run_async o gradle_build), sin tener que acarrear el id. Un id inexistente
+    responde con la lista de trabajos en la misma respuesta.
+    'desde_out'/'desde_err': solo las líneas NUEVAS después de esa línea de
+    cada log; el pie [delta] de cada respuesta trae los valores para la
+    próxima llamada. Con 'pid' (en vez de id), dice si ese proceso sigue vivo
+    — para procesos huérfanos cuyo registro de trabajo se perdió.
     Lectura libre (no pide confirmación).
     """
     lg, aviso = _resolver(donde)
@@ -1005,14 +1085,15 @@ def run_status(id: str = "", pid: str = "", donde: str = "local",
                 return f"error: 'pid' debe ser un número entero, no '{pid}'."
         if not id:
             return TR.listar(lg)
-        return TR.estado(lg, id, lineas)
+        return TR.estado(lg, id, lineas, desde_out, desde_err)
     except T.TransporteError as e:
         return f"error: {e}"
 
 
 @mcp.tool()
-def run_esperar(id: str, hasta_segundos: int = 600, lineas: int = 40,
-                donde: str = "local", hasta_patron: str = "") -> str:
+def run_esperar(id: str = "ultimo", hasta_segundos: int = 600, lineas: int = 40,
+                donde: str = "local", hasta_patron: str = "",
+                desde_out: int = 0, desde_err: int = 0) -> str:
     """
     Espera (del lado de Witral) a que termine un trabajo de run_async y devuelve
     su estado final, en vez de hacer polling a mano con sleep + run_status.
@@ -1036,12 +1117,23 @@ def run_esperar(id: str, hasta_segundos: int = 600, lineas: int = 40,
     Devuelve la línea que hizo match, seguida del estado. Si el trabajo termina
     sin que el patrón aparezca, también vuelve —y lo dice—, así que no puede
     quedarse esperando algo que ya no va a salir.
+
+    'id' por defecto es "ultimo": el trabajo más reciente del lugar (la
+    respuesta dice a cuál resolvió). Un id inexistente responde con la lista.
+
+    'desde_out'/'desde_err' (delta): solo las líneas NUEVAS después de esa
+    línea de cada log, en vez del mismo tail en cada vuelta. Cada respuesta
+    termina con un pie [delta] que trae los valores para la próxima llamada.
+
+    Witral no puede avisar por sí solo cuando algo termina; para eso está
+    run_async(..., al_terminar=...).
     """
     lg, aviso = _resolver(donde)
     if aviso:
         return aviso
     try:
-        return TR.esperar(lg, id, hasta_segundos, lineas, hasta_patron)
+        return TR.esperar(lg, id, hasta_segundos, lineas, hasta_patron,
+                          desde_out, desde_err)
     except T.TransporteError as e:
         return f"error: {e}"
 
@@ -1142,6 +1234,12 @@ def sql(donde: str, comando: str, confirmado: bool = False,
     confirmación se pide solo por las ESCRITURAS. En lugares sensibles,
     cualquier ejecución pide confirmación.
     'base': nombre de base alternativa del mismo lugar (override del -d).
+
+    DATOS DE PRUEBA: un fixture va envuelto en BEGIN ... ROLLBACK en UNA sola
+    llamada (cargar, consultar, deshacer). Así se deshace pase lo que pase, sin
+    depender de que una segunda llamada de restauración llegue a correr. En
+    sqlserver es BEGIN TRANSACTION (BEGIN a secas abre un bloque, no una
+    transacción).
     """
     return _correr_sql(donde, comando, confirmado, base)
 

@@ -9,6 +9,12 @@ dependencies = [
     "pyserial>=3.5",
 ]
 
+[project.optional-dependencies]
+# Tool `transcribir`. Aparte porque es pesada (ctranslate2, onnxruntime, av):
+# se instala con `uv sync --extra audio --inexact` desde server/.
+# av<16: faster-whisper 1.2.1 llama av.open(metadata_errors=...), que av 19 ya no acepta.
+audio = ["faster-whisper", "av<16"]
+
 [project.scripts]
 witral = "witral.server:main"
 

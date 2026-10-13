@@ -36,6 +36,7 @@ from . import sintaxis as SX
 from . import puerto_serial as PS
 from . import trabajos as TR
 from . import bitacora as BIT
+from . import audio as AU
 from .config import DestinoDesconocido
 from .seguridad import RutaFueraDeRaiz
 
@@ -1757,6 +1758,42 @@ def sonar_archivo(ruta: str = "", proyecto: str = "",
     editar, refrescar con gradle_build(proyecto, "sonar") (~5 min).
     """
     return R.sonar_issues(ruta, proyecto, nuevos, rama)
+
+
+# --- Audio --------------------------------------------------------------------
+
+@mcp.tool()
+def transcribir(archivo: str, donde: str = "local", modelo: str = "medium",
+                idioma: str = "es", salida: str = "", vad: bool = True,
+                prompt: str = "", umbral: float = 0.5) -> str:
+    """
+    Transcribe un audio (mp3, wav, m4a, ogg, flac, también el audio de un
+    video) con faster-whisper. Se lanza como TRABAJO y RETORNA DE INMEDIATO
+    con el id: seguirlo con run_esperar(id, donde), que muestra el texto
+    segmento a segmento. En CPU tarda del orden de la duración del audio
+    (más con modelos grandes); la primera vez con cada modelo se descarga.
+
+    Salidas, con el nombre base del audio, junto a él o en 'salida':
+    .txt (texto limpio), .tiempos.txt ([mm:ss.ss] por segmento; palabras de
+    baja confianza como [palabra?], segmentos dudosos con (?)), .srt y .lrc.
+
+    'modelo': tiny, base, small, medium (por defecto), large-v3 — más grande,
+    más preciso y más lento. 'idioma': código (es, en…) o "auto" para
+    detectarlo; Whisper NO conoce el mapudungun: esas partes salen
+    aproximadas y marcadas como dudosas. 'prompt': vocabulario o estilo que
+    orienta al modelo (nombres propios, palabras en otra lengua, la primera
+    línea de la letra). 'vad': salta los silencios (desactivarlo si se come
+    partes cantadas). 'umbral': confianza bajo la cual una palabra se marca.
+    En local corre con el venv de Witral (extra 'audio'); en remoto, con
+    python3 del lugar, que debe tener faster-whisper.
+    """
+    lg, aviso = _resolver(donde)
+    if aviso:
+        return aviso
+    try:
+        return AU.transcribir(lg, archivo, modelo, idioma, salida, vad, prompt, umbral)
+    except (RutaFueraDeRaiz, T.TransporteError) as e:
+        return f"error: {e}"
 
 
 @mcp.tool()

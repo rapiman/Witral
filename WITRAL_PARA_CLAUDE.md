@@ -348,6 +348,26 @@ decide que cliente nativo se invoca. Soportados: **postgres** (`psql`) y **sqlse
   `cmdkey /generic:<nombre> /user:<usuario> /pass`. Alternativa sin Windows: variable de
   entorno `WITRAL_SECRETO_<NOMBRE>`.
 
+### Audio (ronda 19)
+- `transcribir(archivo, donde, modelo, idioma, salida, vad, prompt, umbral)` — transcribe un
+  audio (o el audio de un video) con faster-whisper. Se lanza como TRABAJO y devuelve el id
+  al instante: seguirlo con `run_esperar(id, donde, hasta_patron="listo en|error")`; el
+  progreso sale segmento a segmento. Salidas con el nombre base del audio, junto a el o en
+  `salida`: `.txt` (texto limpio), `.tiempos.txt` (`[mm:ss.ss]` por segmento, palabras de
+  baja confianza como `[palabra?]`, segmentos dudosos con `(?)`), `.srt` y `.lrc`.
+- `modelo`: tiny/base/small/medium (defecto)/large-v3. La primera vez con cada uno se
+  descarga de Hugging Face a la cache del usuario (medium ~1,5 GB). En CPU, `small` hace
+  40 s de audio en ~15 s; `medium` y `large-v3` son bastante mas lentos y mas precisos.
+- `idioma`: `es` por defecto, `auto` para detectar. Whisper no conoce el mapudungun: esas
+  partes salen aproximadas y marcadas. `prompt` orienta vocabulario (nombres, palabras en
+  otra lengua); en Windows no admite `%` ni comillas dobles (el comando va a un `.cmd`).
+- `vad`: salta silencios. Sobre canto con musica el VAD puede descartar TODO; si no deja
+  nada, el script repite solo sin VAD y lo dice en el log.
+- Instalacion: extra `audio` del pyproject, desde `server/`: `uv sync --extra audio --inexact`
+  (`--inexact` para no tocar lo demas del venv). Fija `av<16`: faster-whisper 1.2.1 usa un
+  argumento de `av.open` que av 19 elimino. En remoto el script se lleva a
+  `~/.witral/transcribir.py` y corre con `python3` del lugar, que debe tener faster-whisper.
+
 
 ### Android / ADB
 - `adb_devices(donde)` — lista dispositivos.

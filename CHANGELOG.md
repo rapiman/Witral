@@ -7,6 +7,19 @@ y el proyecto adhiere a [Versionado Semántico](https://semver.org/lang/es/).
 
 ## [No publicado]
 
+### Ronda 19 — transcribir audio
+
+**Añadido**
+- Tool `transcribir(archivo, donde, modelo, idioma, salida, vad, prompt, umbral)`:
+  transcripción con faster-whisper, lanzada como trabajo (`run_esperar` para
+  seguirla). Salidas `.txt`, `.tiempos.txt` (con palabras dudosas marcadas),
+  `.srt` y `.lrc`. Lógica en `audio.py`; la transcripción en `transcribir.py`,
+  un script suelto que en un lugar remoto se lleva a `~/.witral/` y corre con
+  el `python3` de allá.
+- Extra `audio` en el pyproject (`uv sync --extra audio --inexact`), con
+  `av<16` por una incompatibilidad de faster-whisper 1.2.1 con av 19.
+- Si el VAD descarta todo (canto sobre música), el script repite sin VAD.
+
 ### Ronda 18 — trabajos sin acarrear ids, esperas sin repetir, y el SQL por su camino
 
 Feedback de una sesión conducida por un agente: las fricciones de un consumidor

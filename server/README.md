@@ -31,7 +31,7 @@ witral/server/
 Con `uv` (recomendado):
 
 ```
-cd C:\Users\jprapiman_transforma\Documents\Proyectos\witral\server
+cd <ruta>\witral\server
 uv venv
 uv pip install -e .
 ```
@@ -39,7 +39,7 @@ uv pip install -e .
 O con pip:
 
 ```
-cd C:\Users\jprapiman_transforma\Documents\Proyectos\witral\server
+cd <ruta>\witral\server
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
@@ -79,7 +79,7 @@ Editá `claude_desktop_config.json` y agregá:
       "args": [
         "run",
         "--directory",
-        "C:\\Users\\jprapiman_transforma\\Documents\\Proyectos\\witral\\server",
+        "<ruta>\\witral\\server",
         "witral"
       ]
     }

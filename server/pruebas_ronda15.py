@@ -161,11 +161,11 @@ try:
 
     print("\n--- adb_estado_app: parseo de dumpsys ---")
     DUMPSYS = """Packages:
-  Package [cl.bci.pagos] (a1b2):
+  Package [com.ejemplo.pagos] (a1b2):
     versionCode=2040100 minSdk=24 targetSdk=34
     versionName=2.4.1
     flags=[ DEBUGGABLE HAS_CODE ALLOW_BACKUP ]
-    codePath=/data/app/~~xyz==/cl.bci.pagos-1
+    codePath=/data/app/~~xyz==/com.ejemplo.pagos-1
     firstInstallTime=2026-07-01 10:00:00
     lastUpdateTime=2026-08-18 09:12:33
     installerPackageName=com.android.shell
@@ -173,7 +173,7 @@ try:
     original = T.ejecutar
     T.ejecutar = lambda *a, **k: T.Resultado(0, DUMPSYS, "")
     try:
-        salida = M.adb_estado_app(lg, "S1", "cl.bci.pagos")
+        salida = M.adb_estado_app(lg, "S1", "com.ejemplo.pagos")
     finally:
         T.ejecutar = original
     for campo in ("versionName: 2.4.1", "versionCode: 2040100",

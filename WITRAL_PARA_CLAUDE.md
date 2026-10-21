@@ -809,7 +809,7 @@ llamadas. Detalle en el CHANGELOG. Resumen:
 
 Validado con `server/pruebas_ronda18.py` (incluye procesos reales para `al_terminar` en
 Windows) y las rondas 14-17 en verde. Hecha en finoli, que estaba dos rondas atras: se trajo
-`origin/main` (5009707) antes de empezar.
+`origin/main` (20fac87) antes de empezar.
 
 PENDIENTE: reinicio completo de Claude Desktop + conversacion nueva (firmas nuevas de
 `run`, `run_async`, `run_status`, `run_esperar`) y verificacion en vivo: un `run_async` con
@@ -942,7 +942,7 @@ PENDIENTE reinicio completo de Claude Desktop + conversacion nueva (hay una tool
 ATENCION: la copia `Proyectos\WITRAL_PARA_CLAUDE.md` (fuera del repo) quedo congelada en la
 ronda 11. La version vigente es esta, la del repo.
 
-### Sesion anterior (2026-08-11, ronda 13: motor sqlserver + lugares SAAM/EAM)
+### Sesion anterior (2026-08-11, ronda 13: motor sqlserver)
 
 Witral pasa de "solo postgres" a "el motor es un eje". Detalle completo en el
 CHANGELOG (ronda 13). Resumen operativo:
@@ -951,14 +951,9 @@ CHANGELOG (ronda 13). Resumen operativo:
 - Motor `sqlserver` via `sqlcmd` (ya venia instalado en finoli con las ODBC 170
   Tools). No hay cliente Oracle en la maquina y `oracle` NO esta implementado.
 - Lugares nuevos, todos locales (el cliente corre aca, la base esta detras de la
-  VPN): `saam` -> INFORDES (desarrollo), `saam_qas` -> INFORQAS y `saam_rep` ->
-  INFORREP, estos dos marcados `sensible` para que toda escritura pida
-  confirmacion. Mismo servidor SQL Server 2017.
-- Contexto del trabajo: Infor EAM (hoy Hexagon EAM), el sistema de mantenimiento.
-  El esquema `dbo` tiene 1.901 tablas, 1.239 con prefijo `R5`. Las ordenes de
-  trabajo NO estan en una tabla `R5WORKORDERS`: viven en `R5EVENTS` (herencia de
-  Datastream 7i).
-- VERIFICADO contra la base real corriendo `basedatos.py` con el venv: lectura
+  VPN): desarrollo, QA y replica sobre un mismo SQL Server 2017; los dos ultimos
+  marcados `sensible` para que toda escritura pida confirmacion.
+- VERIFICADO contra una base real corriendo `basedatos.py` con el venv: lectura
   multi-sentencia, acentos intactos, error de SQL que corta el lote con codigo 1,
   heuristica de destructivo, override de `base`, y limpieza del temporal.
 - PENDIENTE: reinicio completo de Claude Desktop + conversacion nueva para que
@@ -1374,18 +1369,18 @@ bien. Por eso la verificacion se hizo en el contenedor de Claude, no con run loc
 
 El push local a otro repo propio murió con 401: el remoto HTTPS estaba anclado
 a rapiman@github.com pero el credential manager de Windows solo tenía
-tokens de jprapiman, y la llave SSH histórica de la máquina
-(~/.ssh/id_ed25519) está asociada a la cuenta jprapiman (GitHub responde
+tokens de otra cuenta, y la llave SSH histórica de la máquina
+(~/.ssh/id_ed25519) está asociada a esa otra cuenta (GitHub responde
 "Repository not found" al repo de rapiman con ella).
 
 Arreglo definitivo (mismo esquema que wedwed):
 - Llave dedicada ~/.ssh/id_ed25519_rapiman, registrada en la cuenta
   rapiman de GitHub (título "local").
 - El repo afectado quedó: remoto git@github.com:rapiman/<repo>.git y
-  core.sshCommand "ssh -i C:/Users/jprapiman_transforma/.ssh/id_ed25519_rapiman
+  core.sshCommand "ssh -i C:/Users/<usuario>/.ssh/id_ed25519_rapiman
   -o IdentitiesOnly=yes" (IdentitiesOnly evita que ofrezca primero la
-  llave de jprapiman).
-- La llave vieja id_ed25519 sigue intacta para lo de jprapiman.
+  llave de la otra cuenta).
+- La llave vieja id_ed25519 sigue intacta para la otra cuenta.
 - Si se clona OTRO repo de la misma cuenta en local, repetir el core.sshCommand
   en ese repo (la config es por-repo, a propósito).
 

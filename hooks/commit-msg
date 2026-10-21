@@ -4,7 +4,7 @@
 #
 # Los commits de estos repos van a nombre de quien los pide, no del modelo que
 # los redacto. La herramienta lo agrega por omision y ya se colo una vez
-# (02c9ba3 en bcipagos-posintegrado-demo), que costo reescribir la historia
+# (en otro repo), que costo reescribir la historia
 # completa del repo para sacarlo.
 #
 # Este hook corre pase lo que pase: git_commit de witral, un 'git commit'

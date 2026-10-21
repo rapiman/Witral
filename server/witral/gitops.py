@@ -80,7 +80,7 @@ def _sin_atribucion(mensaje: str) -> tuple[str, list[str]]:
 
     Los commits de estos repos van a nombre de quien los pide, no del modelo que
     los redactó. La herramienta lo agrega por omisión y ya se coló una vez
-    (02c9ba3 en bcipagos-posintegrado-demo), que costó reescribir la historia
+    (en otro repo), que costó reescribir la historia
     completa del repo para sacarlo.
 
     Esto es una red, no la defensa principal: solo cubre los commits que pasan

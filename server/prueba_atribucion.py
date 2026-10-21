@@ -17,9 +17,9 @@ CASOS = [
     ),
     (
         "Con coautor de verdad\n\n"
-        "Co-Authored-By: Andres Zamorano <azamorano@bci.cl>\n",
+        "Co-Authored-By: Ana Perez <ana.perez@ejemplo.com>\n",
         "Con coautor de verdad\n\n"
-        "Co-Authored-By: Andres Zamorano <azamorano@bci.cl>\n",
+        "Co-Authored-By: Ana Perez <ana.perez@ejemplo.com>\n",
         0,
     ),
     (

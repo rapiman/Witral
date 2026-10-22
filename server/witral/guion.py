@@ -24,7 +24,7 @@ Verbos (uno por línea; '#' comenta; el primer token es el verbo):
 
 Como el cliente MCP corta las llamadas largas (~45s), el runner corre con un
 presupuesto de tiempo por llamada; si un guión largo no termina, devuelve
-'EN PROGRESO: seguí con desde=K' y se retoma desde ese paso.
+'EN PROGRESO: seguir con desde=K' y se retoma desde ese paso.
 """
 
 from __future__ import annotations
@@ -216,7 +216,7 @@ def _pausa(idx: int, total: int, traza: list, capturas: list, nota: str = "") ->
     llamada; se retoma con `desde=idx`."""
     extra = f" ({nota})" if nota else ""
     cuerpo = (f"EN PROGRESO: {idx - 1}/{total} pasos ok en esta llamada{extra}. "
-              f"El cliente MCP corta las llamadas largas; seguí con "
+              f"El cliente MCP corta las llamadas largas; seguir con "
               f"adb_guion(..., desde={idx}).\n" + "\n".join(traza[-6:]))
     return {"ok": True, "parcial": True, "siguiente": idx,
             "texto": cuerpo, "imagenes": capturas}
@@ -342,7 +342,7 @@ def correr(lugar: Lugar, serial: str, ruta: str, origen: Lugar | None = None,
         if verbo == "humano":
             traza.append(f"{idx:>2}/{total} humano {arg}  -> pausa (paso humano)")
             cuerpo = (f"PASO HUMANO ({idx}/{total}): {arg}\n"
-                      f"Cuando esté hecho, seguí con adb_guion(..., "
+                      f"Cuando esté hecho, seguir con adb_guion(..., "
                       f"desde={idx + 1}).\n" + "\n".join(traza[-6:]))
             return {"ok": True, "parcial": True, "siguiente": idx + 1,
                     "texto": cuerpo, "imagenes": capturas}

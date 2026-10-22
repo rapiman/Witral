@@ -540,8 +540,8 @@ def _pista_escape_unicode(buscado: str, texto: str) -> str:
                     f"\n[pista: '{ch}' (U+{ord(ch):04X}) figura en el archivo como "
                     f"el escape literal '{esc}'. La capa JSON/MCP desescapa los "
                     f"\\uXXXX del input, así que tu texto llega con el carácter y no "
-                    f"matchea el escape del archivo. Anclá en texto ASCII adyacente, "
-                    f"o editá por número de línea sin incluir el escape.]"
+                    f"matchea el escape del archivo. Anclar en texto ASCII adyacente, "
+                    f"o editar por número de línea sin incluir el escape.]"
                 )
     return ""
 

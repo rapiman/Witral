@@ -183,7 +183,7 @@ def buscar_contenido(lugar: Lugar, objetivo: str, patron: str,
         cuerpo = "\n".join(out)
         if estado["trunc"]:
             cuerpo += (f"\n... [tope de {tope} coincidencias alcanzado; hay más. "
-                       f"Afiná el patrón (p. ej. límites de palabra \\b) o subí "
+                       f"Afinar el patrón (p. ej. límites de palabra \\b) o subir "
                        f"max_resultados.]")
         return cuerpo
     # remoto: si es archivo, grep directo; si es carpeta, grep -rn con --include.
@@ -208,6 +208,6 @@ def buscar_contenido(lugar: Lugar, objetivo: str, patron: str,
     r = T.ejecutar(lugar, cmd)
     salida = r.salida or "(sin coincidencias)"
     if presupuesto and r.salida and (r.salida.count("\n") + 1) >= presupuesto:
-        salida += (f"\n... [salida acotada a ~{tope} coincidencias; afiná el "
-                   f"patrón o subí max_resultados.]")
+        salida += (f"\n... [salida acotada a ~{tope} coincidencias; afinar el "
+                   f"patrón o subir max_resultados.]")
     return salida

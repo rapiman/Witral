@@ -120,15 +120,15 @@ def _diagnostico_ssh(e: Exception, destino: str) -> str:
                 f"reinstalado). Si el cambio es legítimo, borrar la línea de "
                 f"ese host en el archivo y reconectar.")
     if _HAY_PARAMIKO and isinstance(e, paramiko.AuthenticationException):
-        return (f"SSH a {destino}: autenticación rechazada. Revisá usuario, "
+        return (f"SSH a {destino}: autenticación rechazada. Revisar usuario, "
                 f"clave o password en lugares.json.")
     if isinstance(e, socket.gaierror):
-        return (f"SSH a {destino}: el host no resuelve (DNS). Revisá el nombre "
+        return (f"SSH a {destino}: el host no resuelve (DNS). Revisar el nombre "
                 f"del host o tu conexión/VPN.")
     if isinstance(e, socket.timeout) or "timed out" in str(e).lower():
         return (f"SSH a {destino}: timeout de conexión (15s). El host no "
                 f"responde: puede estar caído, bloqueado por firewall, o "
-                f"necesitás VPN.")
+                f"hace falta VPN.")
     if isinstance(e, ConnectionRefusedError) or "refused" in str(e).lower():
         return (f"SSH a {destino}: conexión rechazada. ¿El puerto es correcto y "
                 f"el servicio SSH está corriendo?")
@@ -297,19 +297,29 @@ def _ejecutar_local(argv, *, cwd, entrada, timeout, env_extra=None) -> Resultado
         # el drenaje de pipes quedaba colgado para siempre si un nieto seguía
         # vivo (los cuelgues de 4 min que ni siquiera devolvían 124). Ahora se
         # mata el árbol entero y el drenaje termina.
+        # Si el hijo directo YA terminó, lo que mantiene abierta la salida es un
+        # descendiente que la heredó y quedó huérfano (típico: una ventana abierta
+        # con `start`). taskkill /T no lo alcanza porque su padre ya no existe.
+        hijo_termino = proc.poll() is not None
         _matar_arbol(proc)
         try:
             out, err = proc.communicate(timeout=5)
         except Exception:
+            # NO cerrar proc.stdout/stderr aquí. Con un descendiente vivo, el hilo
+            # lector de communicate sigue bloqueado en read() y close() espera su
+            # lock: la llamada quedaba colgada para siempre (y con ella todas las
+            # siguientes, porque el servidor atiende de a una). Se abandonan los
+            # pipes; los hilos lectores son daemon y terminan cuando el
+            # descendiente cierre su copia del handle.
             out, err = b"", b""
-            for canal in (proc.stdout, proc.stderr, proc.stdin):
-                try:
-                    if canal:
-                        canal.close()
-                except Exception:
-                    pass
         detalle = _decodificar_salida(err or b"").strip()
         msj = f"timeout tras {timeout}s (árbol de procesos terminado)"
+        if hijo_termino:
+            msj = (f"timeout tras {timeout}s: el comando terminó, pero un proceso que "
+                   "lanzó sigue vivo con la salida heredada (p. ej. una ventana abierta "
+                   "con `start`). Ese proceso NO se cerró. Para abrir programas con "
+                   "ventana sin esperar: shell=\"powershell\" con "
+                   "Start-Process -FilePath <exe> (no hereda la salida).")
         return Resultado(124, _decodificar_salida(out or b""),
                          f"{detalle}\n{msj}".strip() if detalle else msj)
     return Resultado(proc.returncode, _decodificar_salida(out),

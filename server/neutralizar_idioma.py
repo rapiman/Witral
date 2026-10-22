@@ -26,6 +26,10 @@ REEMPLAZOS = [
     ("que ESPERÁS", "que SE ESPERA"),
     ("lo pasás", "se pasa"),
     ("al toque", "de inmediato"),
+    # "seguí" va como FRASE, nunca como palabra suelta: "seguí" es prefijo de
+    # "seguía" (imperfecto legítimo), y un replace literal lo dejaría en
+    # "seguira".
+    ("seguí con", "seguir con"),
     # Coloquialismos que sobreviven sin tilde (la documentación se escribe sin
     # acentos, así que el filtro de arriba no los ve).
     ("que igual pilla el error", "que igual detecta el error"),
@@ -91,11 +95,38 @@ REEMPLAZOS = [
     ("Usá", "Usar"),
     ("pasá", "pasar"),
     ("Pasá", "Pasar"),
+    ("revisá", "revisar"),
+    ("Revisá", "Revisar"),
+    ("corregí", "corregir"),
+    ("Corregí", "Corregir"),
+    ("reiniciá", "reiniciar"),
+    ("Reiniciá", "Reiniciar"),
+    ("afiná", "afinar"),
+    ("Afiná", "Afinar"),
+    ("o subí", "o subir"),
+    ("necesitás", "hace falta"),
+    ("indicá", "indicar"),
+    ("Indicá", "Indicar"),
+    ("anclá", "anclar"),
+    ("Anclá", "Anclar"),
+    ("editá", "editar"),
+    ("Editá", "Editar"),
+    ("guardá", "guardar"),
+    ("Guardá", "Guardar"),
     ("podés", "se puede"),
     ("tenés", "hay que"),
     ("querés", "se quiere"),
     ("acá", "aquí"),
     ("Acá", "Aquí"),
+]
+
+# Palabras LEGÍTIMAS que contienen una forma de voseo como prefijo: "seguía"
+# contiene "seguí", "escribía" contiene "escribí". Un replace literal las
+# rompería ("escribía" -> "escribira"), así que se enmascaran antes de la
+# pasada y se restauran al final.
+PROTEGIDAS = [
+    "seguía", "seguían", "seguías",
+    "escribía", "escribían", "escribías",
 ]
 
 OBJETIVOS = [
@@ -127,12 +158,16 @@ def main():
         with open(ruta, "r", encoding="utf-8", newline="") as f:
             texto = f.read()
         nuevo = texto
+        for i, palabra in enumerate(PROTEGIDAS):
+            nuevo = nuevo.replace(palabra, f"\x00{i}\x00")
         cuenta = {}
         for viejo, reemplazo in REEMPLAZOS:
             n = nuevo.count(viejo)
             if n:
                 cuenta[viejo] = n
                 nuevo = nuevo.replace(viejo, reemplazo)
+        for i, palabra in enumerate(PROTEGIDAS):
+            nuevo = nuevo.replace(f"\x00{i}\x00", palabra)
         if not cuenta:
             continue
         n = sum(cuenta.values())

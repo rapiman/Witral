@@ -51,7 +51,7 @@ def _aviso_config() -> str:
         return (
             "⚠️  CONFIG CON ERRORES — Witral arrancó solo con el lugar 'local'.\n"
             f"{_cfg.error_config}\n"
-            "Corregí el archivo y reiniciá para recuperar los demás lugares "
+            "Corregir el archivo y reiniciar para recuperar los demás lugares "
             "e identidades.\n\n"
         )
     return ""
@@ -482,7 +482,7 @@ def editar_linea(archivo: str, desde: int = 0, hasta: int = 0, nuevo: str = "",
     if linea > 0:
         desde = hasta = linea
     if desde <= 0:
-        return ("Indicá 'linea' (una sola línea) o 'desde'/'hasta' (rango). "
+        return ("Indicar 'linea' (una sola línea) o 'desde'/'hasta' (rango). "
                 "Ej.: linea=33, nuevo=\"...\".")
     if hasta <= 0:
         hasta = desde  # una sola línea: hasta = desde
@@ -725,7 +725,7 @@ def desplegar(origen: str, destino: str, servicio: str = "",
         rs = S.servicio(d, "restart", servicio)
         partes.append(f"RESTART ({servicio}):\n{_fmt(rs)}")
         if not rs.ok:
-            partes.append("⚠️  el restart devolvió error: revisá antes de "
+            partes.append("⚠️  el restart devolvió error: revisar antes de "
                           "confiar en la prueba de humo.")
     # 3) prueba de humo.
     if prueba_url:
@@ -929,6 +929,12 @@ def run(comando: str, donde: str = "local", confirmado: bool = False,
     MCP (~60s) y devuelve código 124 con el aviso de pasar a run_async. Así un
     comando que se pasó de largo se ve como un timeout limpio y accionable, no
     como una llamada muerta.
+
+    NO ABRIR PROGRAMAS CON VENTANA CON `start` (ni lanzar algo que quede
+    corriendo): el proceso hereda la salida de cmd y `run` espera hasta el tope.
+    Para abrir una app sin esperar: shell="powershell" con
+    Start-Process -FilePath "<ruta\\app.exe>" (no hereda la salida y vuelve al
+    instante). Para trabajos largos, run_async.
 
     EN LUGARES WINDOWS EL SHELL ES cmd, NO bash: no hay heredocs (`<<EOF`
     muere con "no se esperaba << en este momento"), ni `$(...)`, ni comillas
@@ -1348,7 +1354,7 @@ def psql_aplicar(donde: str, ruta_sql: str, confirmado: bool = False,
         if aviso:
             return aviso
     if not confirmado:
-        extra = " (LUGAR SENSIBLE — revisá el contenido del .sql primero)" if lg.sensible else ""
+        extra = " (LUGAR SENSIBLE — revisar el contenido del .sql primero)" if lg.sensible else ""
         de = f" (archivo en '{origen}')" if origen and origen != donde else ""
         en_base = f" base: {base}" if base else ""
         return (
@@ -2074,8 +2080,8 @@ def adb_guion(serial: str, archivo: str, paquete: str = "", desde: int = 1,
     todos los $monto comparten; inline, $rnd(min,max,paso) y
     $rnd_opcion(10%,20%,30%) ruedan un valor por ocurrencia. Lo elegido sale
     en la traza y en la línea final ("Aleatorios: ..."). Como el cliente
-    MCP corta las llamadas largas, un guión largo se pausa y devuelve 'seguí
-    con desde=K'.
+    MCP corta las llamadas largas, un guión largo se pausa y devuelve
+    'seguir con desde=K'.
     """
     lg, aviso = _resolver(donde)
     if aviso:

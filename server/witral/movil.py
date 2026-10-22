@@ -612,7 +612,7 @@ def adb_esperar(lugar: Lugar, serial: str, texto: str = "", patron_log: str = ""
     """
     import time as _t
     if not texto and not patron_log:
-        return "error: indicá 'texto' (esperar en la UI) o 'patron_log' (esperar en logcat)."
+        return "error: indicar 'texto' (esperar en la UI) o 'patron_log' (esperar en logcat)."
     timeout = min(max(1, timeout), 40)
     if patron_log:
         return _esperar_log(lugar, serial, patron_log, timeout, tags)
@@ -823,7 +823,7 @@ def _fmt_resultado(r: T.Resultado) -> str:
 # parametros en QA. Requiere run-as (app debuggable); en release no hay acceso.
 
 # Mapa field-de-Value -> nombre de tipo legible.
-# OJO con el orden de los ultimos dos: en PreferencesProto.Value el field 6 es
+# ATENCION con el orden de los ultimos dos: en PreferencesProto.Value el field 6 es
 # string_set y el 7 es double (no al reves). Estuvieron invertidos hasta la
 # ronda 16: un double escrito por datastore_set salia como field 6, que la app
 # lee como StringSet y revienta al cargar la pref.
@@ -1083,11 +1083,11 @@ def datastore_set(lugar: Lugar, serial: str, paquete: str, archivo: str,
     if tipo == "auto":
         if not existe:
             return (f"error: la clave '{clave}' no existe en el datastore; "
-                    f"'auto' solo sirve para claves existentes. Indicá 'tipo' "
+                    f"'auto' solo sirve para claves existentes. Indicar 'tipo' "
                     f"explícito (string/int/long/bool/float/double) para crearla.")
         if tipo_actual in (None, "desconocido"):
             return (f"error: no pude detectar el tipo actual de '{clave}'. "
-                    f"Indicá 'tipo' explícito.")
+                    f"Indicar 'tipo' explícito.")
         tipo_final = tipo_actual
     else:
         tipo_final = tipo

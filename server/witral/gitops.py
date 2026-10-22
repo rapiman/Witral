@@ -216,7 +216,7 @@ def publicar(lugar: Lugar, repo: str, mensaje: str, rutas: list[str] | None = No
     if not p.ok:
         return ("\n\n".join(partes) +
                 f"\n\n[5/5 push] error: {p.error or p.salida}\n"
-                f"(El commit quedó local; revisá el error de push.)")
+                f"(El commit quedó local; revisar el error de push.)")
     partes.append(f"[5/5 push]\n{(p.salida or p.error or 'OK').strip()}")
     return "\n\n".join(partes)
 

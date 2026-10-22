@@ -85,7 +85,7 @@ def sincronizar(cfg: Config, origen: str, destino: str, excluir: list[str],
     d = cfg.resolver(d_lugar)
     if o.nombre != d.nombre:
         return (f"sincronizar opera DENTRO de un mismo lugar (rsync local a esa "
-                f"máquina); acá vienen '{o.nombre}' y '{d.nombre}'. Para mover "
+                f"máquina); aquí vienen '{o.nombre}' y '{d.nombre}'. Para mover "
                 f"entre lugares está `copiar` (SFTP, un archivo).")
     if o.es_windows:
         return (f"'{o.nombre}' es Windows: no hay rsync. Para un árbol en "

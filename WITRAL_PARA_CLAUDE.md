@@ -423,7 +423,7 @@ decide que cliente nativo se invoca. Soportados: **postgres** (`psql`) y **sqlse
   `esperar_log`, `verificar`, `no_debe`, `atras`, `captura`, `humano <mensaje>` (pausa y
   pide ese paso al usuario: tarjeta real, PIN fisico) y `pin` (teclea un PIN SIN valor de
   seguridad — clave de menu/config — SOLO con confirmado=True en la llamada). Guiones
-  largos se pausan y devuelven `seguí con desde=K` (el cliente MCP corta las llamadas
+  largos se pausan y devuelven `seguir con desde=K` (el cliente MCP corta las llamadas
   largas). VARIABLES `$nombre` resueltas con `valores="nombre=valor;..."`: el valor vive
   solo en la llamada (nunca en el .txt; en los `pin` se enmascara ···· en toda salida) y
   parametriza guiones (`escribir $monto+Continuar`). ALEATORIOS por corrida:
@@ -593,6 +593,13 @@ app **debuggable** (en release no hay acceso).
   pierde antes de llegar al ejecutable nativo.
 - **Comandos multilinea en `run`**: no funcionan. Encadenar con `&` en UNA sola linea, o
   usar `shell="powershell"`.
+- **No abrir apps con ventana via `run` + `start` (2026-10-22).** La ventana hereda los pipes
+  de salida de cmd y queda huerfana (cmd termina), asi que `taskkill /T` no la alcanza. Antes,
+  al vencer el tope, `_ejecutar_local` cerraba los pipes y `close()` quedaba esperando el lock
+  del hilo lector bloqueado: Witral colgado ~1 hora (hasta reiniciar Claude Desktop), y con el
+  todas las llamadas siguientes. Arreglado: ya no se cierran los pipes tras el tope, y si el hijo
+  directo ya habia terminado el 124 explica que quedo un descendiente vivo. Forma correcta de
+  abrir una app: `shell="powershell"` con `Start-Process -FilePath <exe>` (no hereda la salida).
 
 ---
 

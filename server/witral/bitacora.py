@@ -5,7 +5,7 @@ salió.
 POR QUÉ EXISTE. `run` es de propósito general y se puede usar para cosas que ya
 tienen tool tipada -- commitear, borrar, empujar. Eso no está prohibido, pero
 hasta ahora no dejaba rastro: el único registro de un `git push --force` hecho
-por acá era el historial de la conversación, que se pierde al cerrarla.
+por aquí era el historial de la conversación, que se pierde al cerrarla.
 
 QUÉ NO HACE. No bloquea, no avisa, no cambia ningún comportamiento. Solo
 registra. La idea es mirar el archivo después de unos días y ver con números

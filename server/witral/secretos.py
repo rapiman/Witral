@@ -241,7 +241,7 @@ def listar(filtro: str = "") -> str:
         lineas.append("Variables de entorno WITRAL_SECRETO_*:")
         lineas += [f"  - {n}" for n in entorno]
     if not lineas:
-        return ("No hay credenciales visibles. Guardá una con:\n"
+        return ("No hay credenciales visibles. Guardar una con:\n"
                 "  cmdkey /generic:<nombre> /user:<usuario> /pass")
     lineas.append("Los valores nunca se muestran; se usan por nombre "
                   "(auth=\"bearer:<nombre>\" en http_request).")
